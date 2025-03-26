@@ -67,6 +67,31 @@ def process_multi_char_field(mapping, field_name, field_value, position_keys, de
     print(f"Processing {field_name} field with value: {field_value}")
     letters_input = list(field_value)
     
+    # Check if position_keys is empty, create a new position if needed
+    if not position_keys:
+        print(f"No position keys found for {field_name}, creating default position")
+        # Create a default position based on field name
+        key_name = f"default_{field_name}"
+        if field_name == "postleitzahl":
+            # Use postal code position from the form
+            mapping[key_name] = {
+                "x0": 170.0,  # Adjust these coordinates as needed
+                "y0": 671.0,
+                "x1": 176.0,
+                "y1": 681.0,
+                "page": 0
+            }
+        else:
+            # Use a general default position
+            mapping[key_name] = {
+                "x0": 160.0,
+                "y0": 400.0,
+                "x1": 166.0,
+                "y1": 410.0,
+                "page": 0
+            }
+        position_keys = [key_name]
+    
     if len(letters_input) > len(position_keys):
         # Calculate average spacing between letters
         deltas = []
@@ -115,16 +140,24 @@ def get_field_keys(config):
     # Process fields according to their configuration
     for field_name, field_conf in field_config.items():
         if "y_coord" in field_conf:
-            # Character field identified by y-coordinate
-            keys = [k for k in mapping if len(k) == 1 and k.isalpha() and 
-                    abs(mapping[k]["y0"] - field_conf["y_coord"]) < field_conf["tolerance"]]
+            # For postleitzahl (postal code), look for digits instead of alpha
+            if field_name == "postleitzahl":
+                keys = [k for k in mapping if len(k) == 1 and k.isdigit() and 
+                        abs(mapping[k]["y0"] - field_conf["y_coord"]) < field_conf["tolerance"]]
+            else:
+                # Character field identified by y-coordinate
+                keys = [k for k in mapping if len(k) == 1 and k.isalpha() and 
+                        abs(mapping[k]["y0"] - field_conf["y_coord"]) < field_conf["tolerance"]]
+                
+            # Sort the keys by x-coordinate (left to right)
             field_keys[field_name] = sorted(keys, key=lambda k: mapping[k]["x0"])
+            
+            # Print details for debugging
+            print(f"Found {len(field_keys[field_name])} positions for {field_name} field")
         elif "prefix" in field_conf:
             # Field identified by prefix
-            field_keys[field_name] = sorted(
-                [k for k in mapping if k.startswith(field_conf["prefix"])],
-                key=lambda k: mapping[k]["x0"]
-            )
+            prefix_keys = [k for k in mapping if k.startswith(field_conf["prefix"])]
+            field_keys[field_name] = sorted(prefix_keys, key=lambda k: mapping[k]["x0"])
         elif "exact_key" in field_conf:
             # Field with an exact key
             field_keys[field_name] = field_conf["exact_key"]
@@ -184,7 +217,7 @@ def fill_pdf_form(form_type, form_data, output_file=None):
         
         # Process multi-character fields
         for field_name in config["field_config"]:
-            if field_name in form_data and isinstance(field_keys[field_name], list):
+            if field_name in form_data and isinstance(field_keys.get(field_name), list):
                 field_keys[field_name] = process_multi_char_field(
                     mapping, 
                     field_name, 
@@ -237,16 +270,22 @@ def fill_pdf_form(form_type, form_data, output_file=None):
         
         # Draw datum fields
         for field_name in field_keys:
-            if not field_name.startswith("datum"):
+            if not field_name.startswith("datum") and field_name != "geburtsdatum":
                 continue
                 
             # Skip if datum is not in form_data
-            if "datum" not in form_data:
+            if field_name == "geburtsdatum":
+                if field_name not in form_data:
+                    continue
+                datum_rect = mapping[field_keys[field_name]]
+                datum_new_y0, _ = convert_coords(datum_rect, height)
+                c.drawString(datum_rect["x0"], datum_new_y0, form_data[field_name])
+            elif "datum" not in form_data:
                 continue
-                
-            datum_rect = mapping[field_keys[field_name]]
-            datum_new_y0, _ = convert_coords(datum_rect, height)
-            c.drawString(datum_rect["x0"], datum_new_y0, form_data["datum"])
+            else:
+                datum_rect = mapping[field_keys[field_name]]
+                datum_new_y0, _ = convert_coords(datum_rect, height)
+                c.drawString(datum_rect["x0"], datum_new_y0, form_data["datum"])
         
         # Draw special character fields (like 'x' markers)
         for field_name in field_keys:
@@ -256,6 +295,15 @@ def fill_pdf_form(form_type, form_data, output_file=None):
             x_rect = mapping[field_keys[field_name]]
             x_new_y0, _ = convert_coords(x_rect, height)
             c.drawString(x_rect["x0"], x_new_y0, "x")
+            
+        # Draw exact key fields (like hausnummer)
+        for field_name in config["field_config"]:
+            if "exact_key" in config["field_config"][field_name] and field_name not in ["geburtsdatum"] and field_name in form_data:
+                exact_key = config["field_config"][field_name]["exact_key"]
+                if exact_key in mapping:
+                    rect = mapping[exact_key]
+                    new_y0, _ = convert_coords(rect, height)
+                    c.drawString(rect["x0"], new_y0, form_data[field_name])
 
         # Save overlay
         c.save()
@@ -266,8 +314,9 @@ def fill_pdf_form(form_type, form_data, output_file=None):
         
         for i in range(len(reader.pages)):
             base_page = reader.pages[i]
-            overlay_page = overlay_reader.pages[i]
-            base_page.merge_page(overlay_page)
+            if i < len(overlay_reader.pages):
+                overlay_page = overlay_reader.pages[i]
+                base_page.merge_page(overlay_page)
             writer.add_page(base_page)
 
         # Create output directory if needed
@@ -293,15 +342,42 @@ def fill_pdf_form(form_type, form_data, output_file=None):
         print(f"Error filling PDF form: {e}")
         return False
 
-def get_form_data():
-    """Get form data from user input"""
+def get_form_data(form_type):
+    """Get form data from user input based on form type"""
     form_data = {}
+    config = load_form_config(form_type)
     
-    form_data["name1"] = input("Enter first name (bisheriger Vertragspartner): ") or "Fischer"
-    form_data["name2"] = input("Enter second name (neuer Vertragspartner): ") or "Divyar"
-    form_data["vorname1"] = input("Enter first vorname (bisheriger Vertragspartner): ") or "Lukas"
-    form_data["vorname2"] = input("Enter second vorname (neuer Vertragspartner): ") or "Simon"
-    form_data["datum"] = input("Enter date (format: DD.MM.YYYY): ") or "20.03.2025"
+    if not config:
+        return None
+    
+    # Determine which fields to prompt for based on form configuration
+    field_config = config.get("field_config", {})
+    
+    # Form1 specific fields
+    if form_type == "form1":
+        form_data["name1"] = input("Enter first name (bisheriger Vertragspartner): ") or "Fischer"
+        form_data["name2"] = input("Enter second name (neuer Vertragspartner): ") or "Divyar"
+        form_data["vorname1"] = input("Enter first vorname (bisheriger Vertragspartner): ") or "Lukas"
+        form_data["vorname2"] = input("Enter second vorname (neuer Vertragspartner): ") or "Simon"
+        form_data["datum"] = input("Enter date (format: DD.MM.YYYY): ") or "20.03.2025"
+    # Form2 specific fields
+    elif form_type == "form2":
+        form_data["name"] = input("Enter name: ") or "Schmidt"
+        form_data["vorname"] = input("Enter first name: ") or "Simon"
+        form_data["strasse"] = input("Enter street name: ") or "Fischerstraße"
+        form_data["hausnummer"] = input("Enter house number: ") or "7"
+        form_data["postleitzahl"] = input("Enter postal code: ") or "10353"
+        form_data["ort"] = input("Enter city: ") or "Berlin"
+        form_data["geburtsdatum"] = input("Enter birth date (format: DD.MM.YYYY): ") or "11.10.1958"
+    # Generic approach for any other form
+    else:
+        print(f"Entering data for {config.get('name', form_type)}:")
+        for field_name in field_config:
+            if field_name.startswith("x"):
+                continue  # Skip 'x' marker fields
+                
+            default_value = ""
+            form_data[field_name] = input(f"Enter {field_name}: ") or default_value
     
     return form_data
 
@@ -346,7 +422,7 @@ def process_batch(form_type, csv_file, output_dir=None):
         # Generate output filename
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
         if output_dir:
-            output_file = os.path.join(output_dir, f"filled_form_{i+1}_{timestamp}.pdf")
+            output_file = os.path.join(output_dir, f"filled_form.pdf")
         else:
             output_file = os.path.join("output", f"filled_form_{i+1}_{timestamp}.pdf")
         
@@ -429,12 +505,21 @@ def main():
         # If batch processing failed, inform the user
         if not success:
             print("Batch processing failed. Check the error messages above for details.")
-            print("Make sure your CSV file has the correct format with headers: name1,name2,vorname1,vorname2,datum")
+            csv_headers = {
+                "form1": "name1,name2,vorname1,vorname2,datum",
+                "form2": "name,vorname,strasse,hausnummer,postleitzahl,ort,geburtsdatum"
+            }
+            header = csv_headers.get(selected_form, "appropriate fields for this form type")
+            print(f"Make sure your CSV file has the correct format with headers: {header}")
     else:
         # Interactive mode
         print("\nEnter form data (press Enter for default values):")
-        form_data = get_form_data()
+        form_data = get_form_data(selected_form)
         
+        if not form_data:
+            print("Failed to get form data. Exiting.")
+            return
+            
         print("\nFilling form...")
         success = fill_pdf_form(selected_form, form_data)
         
