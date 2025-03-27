@@ -5,8 +5,9 @@
     "output_file": "output/filled_form.pdf",
     "temp_overlay_file": "temp_overlay.pdf",
     "font_size": 12,
-    "default_font": "Helvetica",
-    "font_path": "fonts/calibri.ttf",
+
+
+    "font_path":  "AdobeClean-Light.otf",
     "default_letter_spacing": 13,
     "field_config": {
       "vorname1": {
