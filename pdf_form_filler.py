@@ -1,8 +1,4 @@
-"""
-PDF Form Filler
-Fills PDF forms with provided data using coordinates from JSON configurations.
-Supports both interactive input and CSV batch processing.
-"""
+
 from reportlab.pdfgen import canvas
 from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfbase import pdfmetrics
@@ -13,6 +9,7 @@ import csv
 import sys
 import argparse
 from datetime import datetime
+import pdfplumber
 
 # Default configuration
 DEFAULT_CONFIG = {
