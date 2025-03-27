@@ -1,2 +1,2 @@
-name1,name2,vorname1,vorname2,strasse1,strasse2,hausnummer1,hausnummer2,postleitzahl1,postleitzahl2,ort1,ort2,geburtsdatum1,geburtsdatum2,kundennummer,datum
-Monika,Divya,Lukas,Simon,Bachstraße,Bachstraße,7,7,10315,10315,Berlin,Berlin,07.08.1999,11.10.1958,234936402,20.03.2025
+name,vorname,strasse,hausnummer,postleitzahl,ort,geburtsdatum,name1,vorname1,strasse1,hausnummer1,postleitzahl1,ort1,geburtsdatum1,kundennummer,datum,x1,x2,x_herr_auth,x_herr_cust
+Fischer,Simon,Bachstraße,7 2,10315,Berlin,11.10.1958,Fischer,Lukas,Bachstraße,,10315,Berlin,07.08.1999,234936402,20.03.2025,x,x,x,x

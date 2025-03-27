@@ -16,7 +16,7 @@ from datetime import datetime
 
 # Default configuration
 DEFAULT_CONFIG = {
-    "font_size": 12,
+    "font_size": 7,
     "default_font": "Helvetica",
     "default_letter_spacing": 13
 }
