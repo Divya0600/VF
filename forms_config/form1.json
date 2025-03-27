@@ -4,11 +4,10 @@
     "empty_form_file": "forms/empty_form.pdf",
     "output_file": "output/filled_form.pdf",
     "temp_overlay_file": "temp_overlay.pdf",
-    "font_size": 12,
-
-
-    "font_path":  "AdobeClean-Light.otf",
+    "font_size": 10,
+    "font_path": "fonts/AdobeClean-SemiLight.ttf",
     "default_letter_spacing": 13,
+
     "field_config": {
       "vorname1": {
         "y_coord": 333.0,

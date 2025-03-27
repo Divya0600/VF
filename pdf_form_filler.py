@@ -186,22 +186,17 @@ def get_field_keys(config):
 
 def setup_font(config):
     """Set up and register fonts"""
+    if "font_path" not in config or not os.path.exists(config["font_path"]):
+        raise ValueError(f"Font file not found: {config.get('font_path', 'No path specified')}")
+        
     try:
-        if "font_path" in config and os.path.exists(config["font_path"]):
-            font_file = os.path.basename(config["font_path"])
-            font_name = os.path.splitext(font_file)[0]
-            pdfmetrics.registerFont(TTFont(font_name, config["font_path"]))
-            font_to_use = font_name
-            print(f"{font_name} font registered successfully")
-        else:
-            font_to_use = config["default_font"]
-            print(f"Using default font: {font_to_use}")
+        font_file = os.path.basename(config["font_path"])
+        font_name = os.path.splitext(font_file)[0]
+        pdfmetrics.registerFont(TTFont(font_name, config["font_path"]))
+        print(f"{font_name} font registered successfully")
+        return font_name
     except Exception as e:
-        font_to_use = config["default_font"]
-        print(f"Could not register custom font, using {config['default_font']} instead: {e}")
-    
-    return font_to_use
-
+        raise ValueError(f"Failed to register font: {e}")
 
 def fill_pdf_form(form_type, form_data, output_file=None):
     """Fill a PDF form with the provided data"""
