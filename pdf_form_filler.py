@@ -150,24 +150,7 @@ def find_field_positions(pdf_path, field_names):
     return field_positions
 
 def find_id_position(text_positions, id_pattern=None):
-    """Find position of ID number in the PDF"""
-    # Define ID pattern if not provided
-    if id_pattern is None:
-        # Default pattern: sequence of digits, possibly with some separators
-        id_pattern = r'^\d{5,}$|^\d{3,}[-\s]?\d{3,}[-\s]?\d{3,}$'
-    
-    for item in text_positions:
-        if re.match(id_pattern, item['text']):
-            logger.info(f"Found potential ID: {item['text']} at position: {item}")
-            return item
-    
-    # Look for common ID labels and return position after them
-    id_labels = ['ID:', 'ID-Nr.:', 'Kundennummer:', 'Identification:']
-    for i, item in enumerate(text_positions):
-        if any(label in item['text'] for label in id_labels) and i < len(text_positions) - 1:
-            logger.info(f"Found ID label: {item['text']}, next item: {text_positions[i+1]}")
-            return text_positions[i+1]
-    
+    """Always return None to force using exact coordinates"""
     return None
 
 def process_multi_char_field(mapping, field_name, field_value, position_keys, default_spacing):
@@ -414,21 +397,21 @@ def draw_exact_key_fields(c, mapping, field_keys, field_config, form_data, heigh
         # Skip if the field is not in form_data
         if field_name not in form_data:
             continue
+        
+        # Special handling for ID field with exact coordinates
+        if field_name == "ID" and "id_field" in mapping:
+            # Use exact coordinates from configuration
+            rect = mapping["id_field"]
+            new_y0, _ = convert_coords(rect, height)
             
-        # Handle ID field with detected position
-        if field_name == "ID" and id_position:
-            # Convert coordinates for drawing
-            new_y0 = height - id_position["y1"]
-            
-            # First, draw a white rectangle to cover the existing ID
-            # Add some padding to ensure complete coverage
+            # Draw white rectangle to cover existing ID
             padding = 2
             c.setFillColor(white)
             c.rect(
-                id_position["x0"] - padding, 
+                rect["x0"] - padding, 
                 new_y0 - padding,
-                (id_position["x1"] - id_position["x0"]) + (padding * 2), 
-                (id_position["y1"] - id_position["y0"]) + (padding * 2),
+                (rect["x1"] - rect["x0"]) + (padding * 2), 
+                (rect["y1"] - rect["y0"]) + (padding * 2),
                 fill=True, stroke=False
             )
             
@@ -436,16 +419,14 @@ def draw_exact_key_fields(c, mapping, field_keys, field_config, form_data, heigh
             c.setFillColorRGB(0, 0, 0)
             
             # Draw ID with bold effect
-            # If we have a bold font available, use it
             if bold_font_name:
                 c.setFont(bold_font_name, font_size)
-                c.drawString(id_position["x0"], new_y0, form_data[field_name])
+                c.drawString(rect["x0"], new_y0, form_data[field_name])
                 # Reset back to normal font
                 c.setFont(font_name, font_size)
             else:
-                # Otherwise simulate bold by drawing multiple times with slight offset
-                draw_bold_text(c, id_position["x0"], new_y0, form_data[field_name], font_size)
-                
+                draw_bold_text(c, rect["x0"], new_y0, form_data[field_name], font_size)
+            
             continue
             
         # Handle other exact key fields
@@ -540,15 +521,8 @@ def fill_pdf_form(form_type, form_data, output_file=None):
                     config["default_letter_spacing"]
                 )
         
-        # Extract text and find ID position if needed
+        # Extract text and find ID position if needed - ID position will be None due to patched function
         id_position = None
-        if "ID" in form_data:
-            text_positions = extract_text_with_positions(empty_form)
-            id_position = find_id_position(text_positions)
-            if id_position:
-                logger.info(f"Found ID position: {id_position}")
-            else:
-                logger.info("ID position not found, will use configured coordinates if available")
         
         # Prepare canvas
         c, reader, width, height = prepare_overlay_canvas(
@@ -629,43 +603,6 @@ def process_batch(form_type, csv_file, output_dir=None):
     logger.info(f"\nBatch processing completed. {success_count} of {len(form_data_list)} forms processed successfully.")
     return success_count > 0
 
-def get_form_data_by_type(form_type):
-    """Get form-specific data based on form type"""
-    form_data = {}
-    config = load_form_config(form_type)
-    
-    if not config or "field_config" not in config:
-        logger.error(f"Invalid configuration for form type: {form_type}")
-        return None
-    
-    # Generate fields dynamically from configuration
-    fields = []
-    for field_name in config["field_config"]:
-        if not field_name.startswith("x"):  # Skip checkbox fields
-            # Get field description from config if available
-            field_desc = config.get("field_descriptions", {}).get(field_name, field_name)
-            fields.append({
-                "name": field_name,
-                "prompt": f"Enter {field_desc}: ",
-                "default": ""
-            })
-    
-    # Collect data for each field
-    for field in fields:
-        form_data[field["name"]] = input(field["prompt"]) or field["default"]
-    
-    return form_data
-
-def get_form_data(form_type):
-    """Get form data from user input based on form type"""
-    config = load_form_config(form_type)
-    if not config:
-        logger.error(f"Could not load configuration for form type: {form_type}")
-        return None
-    
-    logger.info(f"\nEnter data for {config.get('name', form_type)}:")
-    return get_form_data_by_type(form_type)
-
 def main():
     """Main function - Non-interactive, requires command line parameters"""
     # Set up argument parser
@@ -726,6 +663,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-
-if __name__ == "__main__":
-    main()

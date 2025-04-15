@@ -26,6 +26,6 @@ def train_form_static(filled_form_pdf, mapping_file):
     print(f"Training complete. Field mapping saved to {mapping_file}")
 
 if __name__ == "__main__":
-    filled_form_pdf = "filled_form3.pdf"
+    filled_form_pdf = "./filled forms/filled_form3.pdf"
     mapping_file = "form_mapping_static.json"
     train_form_static(filled_form_pdf, mapping_file)
