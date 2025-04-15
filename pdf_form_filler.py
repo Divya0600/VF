@@ -1,4 +1,3 @@
-
 from reportlab.pdfgen import canvas
 from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfbase import pdfmetrics
@@ -10,11 +9,12 @@ import sys
 import argparse
 from datetime import datetime
 import pdfplumber
+import re
+from reportlab.lib.colors import white
 
 # Default configuration
 DEFAULT_CONFIG = {
     "font_size": 5,
-
     "default_letter_spacing": 13
 }
 
@@ -58,6 +58,49 @@ def convert_coords(orig, page_height):
     new_y0 = page_height - orig["y1"]
     new_y1 = page_height - orig["y0"]
     return new_y0, new_y1
+
+def extract_text_with_positions(pdf_path):
+    """Extract text with positions from PDF"""
+    text_positions = []
+    
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for i, page in enumerate(pdf.pages):
+                words = page.extract_words(x_tolerance=3, y_tolerance=3)
+                for word in words:
+                    text_positions.append({
+                        'text': word['text'],
+                        'x0': word['x0'],
+                        'y0': word['top'],
+                        'x1': word['x1'],
+                        'y1': word['bottom'],
+                        'page': i
+                    })
+        return text_positions
+    except Exception as e:
+        print(f"Error extracting text: {e}")
+        return []
+
+def find_id_position(text_positions, id_pattern=None):
+    """Find position of ID number in the PDF"""
+    # Define ID pattern if not provided
+    if id_pattern is None:
+        # Default pattern: sequence of digits, possibly with some separators
+        id_pattern = r'^\d{5,}$|^\d{3,}[-\s]?\d{3,}[-\s]?\d{3,}$'
+    
+    for item in text_positions:
+        if re.match(id_pattern, item['text']):
+            print(f"Found potential ID: {item['text']} at position: {item}")
+            return item
+    
+    # Look for common ID labels and return position after them
+    id_labels = ['ID:', 'ID-Nr.:', 'Kundennummer:', 'Identification:']
+    for i, item in enumerate(text_positions):
+        if any(label in item['text'] for label in id_labels) and i < len(text_positions) - 1:
+            print(f"Found ID label: {item['text']}, next item: {text_positions[i+1]}")
+            return text_positions[i+1]
+    
+    return None
 
 def process_multi_char_field(mapping, field_name, field_value, position_keys, default_spacing):
     """Process a field with multiple character positions"""
@@ -191,9 +234,32 @@ def setup_font(config):
         font_name = os.path.splitext(font_file)[0]
         pdfmetrics.registerFont(TTFont(font_name, config["font_path"]))
         print(f"{font_name} font registered successfully")
-        return font_name
+        
+        # Try to register bold font if it exists
+        bold_font_path = config.get("bold_font_path")
+        bold_font_name = None
+        
+        if bold_font_path and os.path.exists(bold_font_path):
+            bold_font_file = os.path.basename(bold_font_path)
+            bold_font_name = os.path.splitext(bold_font_file)[0]
+            pdfmetrics.registerFont(TTFont(bold_font_name, bold_font_path))
+            print(f"{bold_font_name} bold font registered successfully")
+        
+        return font_name, bold_font_name
     except Exception as e:
         raise ValueError(f"Failed to register font: {e}")
+
+def draw_bold_text(c, x, y, text, font_size):
+    """Draw text with simulated bold effect by drawing it multiple times with slight offsets"""
+    # Original position
+    c.drawString(x, y, text)
+    
+    # Small offsets to make it appear bold
+    offsets = [0.5, 0.5]
+    for dx in offsets:
+        c.drawString(x + dx, y, text)
+    
+    return
 
 def fill_pdf_form(form_type, form_data, output_file=None):
     """Fill a PDF form with the provided data"""
@@ -204,7 +270,7 @@ def fill_pdf_form(form_type, form_data, output_file=None):
     
     try:
         # Setup font
-        font_name = setup_font(config)
+        font_name, bold_font_name = setup_font(config)
         
         # Get mapping and field keys
         mapping = config["field_coordinates"]
@@ -236,6 +302,16 @@ def fill_pdf_form(form_type, form_data, output_file=None):
             print(f"Empty form file not found: {empty_form}")
             return False
         
+        # Extract text and find ID position if needed
+        id_position = None
+        if "ID" in form_data:
+            text_positions = extract_text_with_positions(empty_form)
+            id_position = find_id_position(text_positions)
+            if id_position:
+                print(f"Found ID position: {id_position}")
+            else:
+                print("ID position not found, will use configured coordinates if available")
+        
         # Open empty form to get dimensions
         reader = PdfReader(empty_form)
         page0 = reader.pages[0]
@@ -244,7 +320,8 @@ def fill_pdf_form(form_type, form_data, output_file=None):
         
         # Create canvas for overlay
         c = canvas.Canvas(temp_overlay, pagesize=(width, height))
-        c.setFont(font_name, config["font_size"])
+        font_size = config["font_size"]
+        c.setFont(font_name, font_size)
         
         # Draw character fields (name and vorname fields)
         for field_name, keys in field_keys.items():
@@ -291,9 +368,47 @@ def fill_pdf_form(form_type, form_data, output_file=None):
             x_new_y0, _ = convert_coords(x_rect, height)
             c.drawString(x_rect["x0"], x_new_y0, "x")
             
-        # Draw exact key fields (like hausnummer)
+        # Draw exact key fields (like hausnummer) and ID field
         for field_name in config["field_config"]:
-            if "exact_key" in config["field_config"][field_name] and field_name not in ["geburtsdatum"] and field_name in form_data:
+            # Skip if the field is not in form_data
+            if field_name not in form_data:
+                continue
+                
+            # Handle ID field with detected position
+            if field_name == "ID" and id_position:
+                # Convert coordinates for drawing
+                new_y0 = height - id_position["y1"]
+                
+                # First, draw a white rectangle to cover the existing ID
+                # Add some padding to ensure complete coverage
+                padding = 2
+                c.setFillColor(white)
+                c.rect(
+                    id_position["x0"] - padding, 
+                    new_y0 - padding,
+                    (id_position["x1"] - id_position["x0"]) + (padding * 2), 
+                    (id_position["y1"] - id_position["y0"]) + (padding * 2),
+                    fill=True, stroke=False
+                )
+                
+                # Reset to black color for text
+                c.setFillColorRGB(0, 0, 0)
+                
+                # Draw ID with bold effect
+                # If we have a bold font available, use it
+                if bold_font_name:
+                    c.setFont(bold_font_name, font_size)
+                    c.drawString(id_position["x0"], new_y0, form_data[field_name])
+                    # Reset back to normal font
+                    c.setFont(font_name, font_size)
+                else:
+                    # Otherwise simulate bold by drawing multiple times with slight offset
+                    draw_bold_text(c, id_position["x0"], new_y0, form_data[field_name], font_size)
+                    
+                continue
+                
+            # Handle other exact key fields
+            if "exact_key" in config["field_config"][field_name] and field_name not in ["geburtsdatum"]:
                 exact_key = config["field_config"][field_name]["exact_key"]
                 if exact_key in mapping:
                     rect = mapping[exact_key]
@@ -355,6 +470,7 @@ def get_form_data(form_type):
         form_data["vorname1"] = input("Enter first vorname (bisheriger Vertragspartner): ") or "Lukas"
         form_data["vorname2"] = input("Enter second vorname (neuer Vertragspartner): ") or "Simon"
         form_data["datum"] = input("Enter date (format: DD.MM.YYYY): ") or "20.03.2025"
+        form_data["ID"] = input("Enter ID: ") or "1234567891234"
     # Form2 specific fields
     elif form_type == "form2":
         form_data["name"] = input("Enter name: ") or "Schmidt"
@@ -501,7 +617,7 @@ def main():
         if not success:
             print("Batch processing failed. Check the error messages above for details.")
             csv_headers = {
-                "form1": "name1,name2,vorname1,vorname2,datum",
+                "form1": "name1,name2,vorname1,vorname2,datum,ID",
                 "form2": "name,vorname,strasse,hausnummer,postleitzahl,ort,geburtsdatum"
             }
             header = csv_headers.get(selected_form, "appropriate fields for this form type")
