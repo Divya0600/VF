@@ -35,40 +35,35 @@ const FormFillerApp = () => {
   // Fetch form types and templates from backend
   useEffect(() => {
     const fetchFormTypes = async () => {
-      try {
-        setLoading(true);
-        
-        // In a real implementation, this would fetch from an API
-        // For now, we'll use mock data
-        
-        // Simulate API delay
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // Mock response data - this would come from your backend
-        const formTypesList = [
-          { id: 'all', name: 'All Forms' },
-          { id: 'pdf', name: 'PDF Forms' },
-          { id: 'tif', name: 'TIF Forms' },
-          { id: 'email', name: 'Email Templates' }
-        ];
-        
-        const templatesData = [
-          { id: 'form1', name: 'Form Type 1', type: 'pdf', description: 'Contract partner change form', lastModified: '2025-02-10' },
-          { id: 'form2', name: 'Vodafone Vollmacht Form', type: 'pdf', description: 'Power of attorney form', lastModified: '2025-03-18' },
-          { id: 'form3', name: 'Vodafone Widerrufsformular', type: 'pdf', description: 'Cancellation form', lastModified: '2025-03-15' },
-          { id: 'email1', name: 'Email Template 1', type: 'email', description: 'Standard email notification', lastModified: '2025-01-25' }
-        ];
-        
-        setFormTypes(formTypesList);
-        setTemplates(templatesData);
-        setSelectedFormType('all');
-        setLoading(false);
-      } catch (err) {
-        console.error('Error fetching form types:', err);
-        setError('Failed to load form types and templates. Please try again.');
-        setLoading(false);
-      }
-    };
+        try {
+          setLoading(true);
+          
+          // Fetch form types
+          const typesResponse = await fetch('/api/forms/types');
+          if (!typesResponse.ok) throw new Error('Failed to fetch form types');
+          const typesData = await typesResponse.json();
+          
+          // Fetch templates
+          const templatesResponse = await fetch('/api/forms/templates');
+          if (!templatesResponse.ok) throw new Error('Failed to fetch templates');
+          const templatesData = await templatesResponse.json();
+          
+          // Add 'all' type if not present
+          const formTypesList = [
+            { id: 'all', name: 'All Forms' },
+            ...typesData.formTypes
+          ];
+          
+          setFormTypes(formTypesList);
+          setTemplates(templatesData.templates);
+          setSelectedFormType('all');
+          setLoading(false);
+        } catch (err) {
+          console.error('Error fetching form types:', err);
+          setError('Failed to load form types and templates. Please try again.');
+          setLoading(false);
+        }
+      };
     
     fetchFormTypes();
   }, []);
@@ -125,7 +120,7 @@ const FormFillerApp = () => {
   };
 
   // Handle file upload
-  const handleFileUpload = (event) => {
+  const handleFileUpload = async (event) => {
     setValidationError(null);
     
     if (event.target.files && event.target.files[0]) {
@@ -143,14 +138,27 @@ const FormFillerApp = () => {
       
       setCsvFile(file);
       
-      // Mock preview data - in a real app, you would parse the CSV here
-      setPreviewData({
-        headers: ['name', 'vorname', 'strasse', 'hausnummer', 'postleitzahl', 'ort', 'geburtsdatum'],
-        rows: [
-          ['Fischer', 'Simon', 'Bachstraße', '12', '10315', 'Berlin', '05.07.1985'],
-          ['Müller', 'Anna', 'Hauptstr.', '45', '80331', 'München', '12.03.1990']
-        ]
-      });
+      // Upload and preview CSV
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch('/api/forms/preview-csv', {
+          method: 'POST',
+          body: formData
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to preview CSV');
+        }
+        
+        const previewData = await response.json();
+        setPreviewData(previewData);
+      } catch (err) {
+        console.error('Error previewing CSV:', err);
+        setValidationError(err.message || 'Failed to preview CSV file');
+      }
     }
   };
 
@@ -166,7 +174,7 @@ const FormFillerApp = () => {
     }
   }, []);
 
-  const handleDrop = useCallback((e) => {
+  const handleDrop = useCallback(async (e) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
@@ -187,37 +195,66 @@ const FormFillerApp = () => {
       
       setCsvFile(file);
       
-      // Mock preview data - in a real app, you would parse the CSV here
-      setPreviewData({
-        headers: ['name', 'vorname', 'strasse', 'hausnummer', 'postleitzahl', 'ort', 'geburtsdatum'],
-        rows: [
-          ['Fischer', 'Simon', 'Bachstraße', '12', '10315', 'Berlin', '05.07.1985'],
-          ['Müller', 'Anna', 'Hauptstr.', '45', '80331', 'München', '12.03.1990']
-        ]
-      });
+      // Upload and preview CSV
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch('/api/forms/preview-csv', {
+          method: 'POST',
+          body: formData
+        });
+        
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to preview CSV');
+        }
+        
+        const previewData = await response.json();
+        setPreviewData(previewData);
+      } catch (err) {
+        console.error('Error previewing CSV:', err);
+        setValidationError(err.message || 'Failed to preview CSV file');
+      }
     }
   }, []);
 
   // Process form with backend
-  const processForm = () => {
-    setStep(3);
-    setProcessing(true);
-    
-    // Simulate processing
-    setTimeout(() => {
-      setProcessing(false);
-      setCompleted(true);
-      setProcessingResults({
-        batchId: 'batch_' + Date.now(),
-        successCount: previewData.rows.length,
-        successRate: '100%',
-        files: previewData.rows.map((_, i) => ({
-          name: `filled_${selectedTemplate.name}_${i+1}.${selectedTemplate.type}`,
-          size: '117 KB',
-          date: new Date().toLocaleDateString()
-        }))
+  const processForm = async () => {
+    try {
+      setStep(3);
+      setProcessing(true);
+      setError(null);
+      
+      const formData = new FormData();
+      formData.append('file', csvFile);
+      formData.append('formType', selectedTemplate.id);
+      
+      console.log('Processing form with:', {
+        formType: selectedTemplate.id,
+        fileName: csvFile.name
       });
-    }, 2000);
+      
+      const response = await fetch('/api/forms/process', {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to process forms');
+      }
+      
+      const result = await response.json();
+      console.log('Process result:', result);
+      setProcessingResults(result);
+      setCompleted(true);
+    } catch (err) {
+      console.error('Error processing forms:', err);
+      setError(err.message || 'Failed to process forms');
+    } finally {
+      setProcessing(false);
+    }
   };
 
 
@@ -917,12 +954,12 @@ const FormFillerApp = () => {
                       <div className="flex space-x-8 items-center">
                         <div className="text-sm text-gray-600 w-20 text-center">{file.size}</div>
                         <div className="w-20">
-                          <button 
+                        <button 
                             className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors"
-                            onClick={() => downloadForm(file.name)}
-                          >
+                            onClick={() => downloadForm(file.name, processingResults.batchId)}
+                        >
                             <Download size={18} />
-                          </button>
+                        </button>
                         </div>
                       </div>
                     </div>
@@ -972,45 +1009,58 @@ const FormFillerApp = () => {
 // Download functionality for FormFillerApp.jsx
 
 // Download a single processed form
-  const downloadForm = (fileName) => {
+  // Download a single form - using batchId for better file location
+  const downloadForm = (fileName, batchId) => {
     try {
-      // Create a direct link to trigger the download
-      const downloadUrl = `/api/forms/download?file=${encodeURIComponent(fileName)}`;
+      console.log(`Attempting to download file: ${fileName} from batch: ${batchId}`);
       
-      // Create a temporary anchor element to trigger the download
-      const anchor = document.createElement('a');
-      anchor.href = downloadUrl;
-      anchor.download = fileName; // This suggests the filename to save as
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
+      // Create a direct download link that will open in a new window/tab
+      // This approach works better for PDFs than the hidden anchor approach
+      window.open(`/api/forms/download?file=${encodeURIComponent(fileName)}&batchId=${batchId}`, '_blank');
+      
+      // Alternative method if window.open doesn't work well:
+      /*
+      const link = document.createElement('a');
+      link.href = `/api/forms/download?file=${encodeURIComponent(fileName)}&batchId=${batchId}`;
+      link.setAttribute('download', fileName);
+      link.setAttribute('target', '_blank');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      */
     } catch (error) {
       console.error('Error downloading file:', error);
-      setError(`Failed to download ${fileName}. Please try again.`);
+      alert('Error downloading file. Please try again.');
     }
   };
-  
-  // Download all processed forms as zip
+    
+  // Download all forms as zip
   const downloadAllForms = () => {
-    try {
-      if (!processingResults || !processingResults.batchId) {
-        setError('No batch ID found for download');
-        return;
+    if (processingResults && processingResults.batchId) {
+      try {
+        const url = `/api/forms/download-all?batchId=${processingResults.batchId}`;
+        
+        // Create a temporary anchor element to trigger download
+        const link = document.createElement('a');
+        link.href = url;
+        link.target = '_blank'; // Open in new tab in case of errors
+        link.rel = 'noopener noreferrer';
+        link.download = `forms_${processingResults.batchId}.zip`; // Set download attribute
+        
+        // Simulate click
+        document.body.appendChild(link);
+        link.click();
+        
+        // Clean up
+        setTimeout(() => {
+          document.body.removeChild(link);
+        }, 100);
+        
+        console.log('Downloading all forms:', processingResults.batchId);
+      } catch (error) {
+        console.error('Error downloading files:', error);
+        alert('Error downloading files. Please try again.');
       }
-      
-      // Create a direct link to trigger the download
-      const downloadUrl = `/api/forms/download-all?batchId=${encodeURIComponent(processingResults.batchId)}`;
-      
-      // Create a temporary anchor element to trigger the download
-      const anchor = document.createElement('a');
-      anchor.href = downloadUrl;
-      anchor.download = `${processingResults.batchId}.zip`; // This suggests the filename to save as
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
-    } catch (error) {
-      console.error('Error downloading batch files:', error);
-      setError('Failed to download batch files. Please try again.');
     }
   };
   // Progress Steps

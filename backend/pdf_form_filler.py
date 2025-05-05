@@ -486,6 +486,8 @@ def fill_pdf_form(form_type, form_data, output_file=None):
         else:
             output_path = config.get("output_file", os.path.join(OUTPUT_DIR, "filled_form.pdf"))
         
+        # Rest of the function...
+        
         # Check if empty form exists
         if not check_path_exists(empty_form, f"Empty form file not found: {empty_form}"):
             return False
@@ -549,6 +551,7 @@ def fill_pdf_form(form_type, form_data, output_file=None):
     except Exception as e:
         logger.exception(f"Error filling PDF form: {e}")
         return False
+
 
 def read_csv_input(csv_file):
     """Read form data from a CSV file"""
