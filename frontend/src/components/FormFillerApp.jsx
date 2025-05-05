@@ -220,6 +220,7 @@ const FormFillerApp = () => {
   }, []);
 
   // Process form with backend
+  // Replace the processForm function in FormFillerApp.jsx
   const processForm = async () => {
     try {
       setStep(3);
@@ -247,6 +248,14 @@ const FormFillerApp = () => {
       
       const result = await response.json();
       console.log('Process result:', result);
+      
+      // Ensure batchId exists in the result
+      if (!result.batchId) {
+        console.error('Server response missing batchId:', result);
+        throw new Error('Server response missing batch ID');
+      }
+      
+      // Set processing results with proper batch ID
       setProcessingResults(result);
       setCompleted(true);
     } catch (err) {
@@ -313,6 +322,22 @@ const FormFillerApp = () => {
     </div>
   );
 
+  const renderDebugInfo = () => {
+    if (process.env.NODE_ENV !== 'development') return null;
+    
+    return (
+      <div className="mt-4 p-4 bg-gray-100 rounded-lg border border-gray-200 text-xs font-mono overflow-auto">
+        <h4 className="font-medium mb-2">Debug Info (development only):</h4>
+        <pre>{JSON.stringify({
+          batchId: processingResults?.batchId,
+          files: processingResults?.files?.map(f => f.name) || [],
+          processing: processing,
+          completed: completed,
+          error: error
+        }, null, 2)}</pre>
+      </div>
+    );
+  };
   // Preview Modal
   
   const renderPreviewModal = () => (
@@ -955,10 +980,19 @@ const FormFillerApp = () => {
                         <div className="text-sm text-gray-600 w-20 text-center">{file.size}</div>
                         <div className="w-20">
                         <button 
-                            className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors"
-                            onClick={() => downloadForm(file.name, processingResults.batchId)}
+                          className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (processingResults && processingResults.batchId) {
+                              downloadForm(file.name, processingResults.batchId);
+                            } else {
+                              console.error('Missing batch ID for download', processingResults);
+                              alert('Error: Cannot download file. Missing batch information.');
+                            }
+                          }}
                         >
-                            <Download size={18} />
+                          <Download size={18} />
                         </button>
                         </div>
                       </div>
@@ -1010,57 +1044,73 @@ const FormFillerApp = () => {
 
 // Download a single processed form
   // Download a single form - using batchId for better file location
+  // Replace the existing downloadForm function with this improved version
+  // Replace both download functions in FormFillerApp.jsx
+
+// Download a single form
   const downloadForm = (fileName, batchId) => {
     try {
       console.log(`Attempting to download file: ${fileName} from batch: ${batchId}`);
       
-      // Create a direct download link that will open in a new window/tab
-      // This approach works better for PDFs than the hidden anchor approach
-      window.open(`/api/forms/download?file=${encodeURIComponent(fileName)}&batchId=${batchId}`, '_blank');
+      if (!batchId) {
+        console.error('Missing batchId for download', processingResults);
+        alert('Error: Missing batch ID. Please try again or reload the page.');
+        return;
+      }
       
-      // Alternative method if window.open doesn't work well:
-      /*
-      const link = document.createElement('a');
-      link.href = `/api/forms/download?file=${encodeURIComponent(fileName)}&batchId=${batchId}`;
-      link.setAttribute('download', fileName);
-      link.setAttribute('target', '_blank');
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      */
+      // Create direct download link with iframe approach to prevent navigation issues
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+      
+      iframe.onload = () => {
+        // Remove iframe after loading (success or error)
+        setTimeout(() => {
+          document.body.removeChild(iframe);
+        }, 1000);
+      };
+      
+      // Set src to download URL
+      iframe.src = `/api/forms/download?file=${encodeURIComponent(fileName)}&batchId=${batchId}`;
     } catch (error) {
       console.error('Error downloading file:', error);
       alert('Error downloading file. Please try again.');
     }
   };
-    
+
   // Download all forms as zip
-  const downloadAllForms = () => {
-    if (processingResults && processingResults.batchId) {
-      try {
-        const url = `/api/forms/download-all?batchId=${processingResults.batchId}`;
-        
-        // Create a temporary anchor element to trigger download
-        const link = document.createElement('a');
-        link.href = url;
-        link.target = '_blank'; // Open in new tab in case of errors
-        link.rel = 'noopener noreferrer';
-        link.download = `forms_${processingResults.batchId}.zip`; // Set download attribute
-        
-        // Simulate click
-        document.body.appendChild(link);
-        link.click();
-        
-        // Clean up
+  const downloadAllForms = (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
+    if (!processingResults || !processingResults.batchId) {
+      console.error('Missing batchId for download all', processingResults);
+      alert('Error: Missing batch ID. Please try again or reload the page.');
+      return;
+    }
+    
+    try {
+      const batchId = processingResults.batchId;
+      const url = `/api/forms/download-all?batchId=${batchId}`;
+      
+      // Use iframe approach for reliable downloads
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+      
+      iframe.onload = () => {
         setTimeout(() => {
-          document.body.removeChild(link);
-        }, 100);
-        
-        console.log('Downloading all forms:', processingResults.batchId);
-      } catch (error) {
-        console.error('Error downloading files:', error);
-        alert('Error downloading files. Please try again.');
-      }
+          document.body.removeChild(iframe);
+        }, 1000);
+      };
+      
+      iframe.src = url;
+      console.log('Downloading all forms:', batchId);
+    } catch (error) {
+      console.error('Error downloading files:', error);
+      alert('Error downloading files. Please try again.');
     }
   };
   // Progress Steps
@@ -1131,6 +1181,7 @@ const FormFillerApp = () => {
       </div>
       
       {renderPreviewModal()}
+      {process.env.NODE_ENV === 'development' && renderDebugInfo()}
     </div>
   );
 };

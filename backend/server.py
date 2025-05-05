@@ -292,6 +292,8 @@ def count_csv_rows(csv_file):
         return 1  # Return 1 to avoid division by zero
 
 
+# Modify the download_form function in server.py
+# Update the download_form function in server.py
 @app.route('/api/forms/download', methods=['GET'])
 def download_form():
     file_name = request.args.get('file')
@@ -301,75 +303,73 @@ def download_form():
     
     if not file_name:
         return jsonify({'error': 'File name not specified'}), 400
+        
+    if not batch_id:
+        return jsonify({'error': 'Batch ID not specified'}), 400
     
-    # If batch_id is provided, look only in that specific batch directory
-    if batch_id:
-        batch_path = os.path.join('output', batch_id)
-        file_path = os.path.join(batch_path, file_name)
+    # Look in the specific batch directory
+    batch_path = os.path.join('output', batch_id)
+    file_path = os.path.join(batch_path, file_name)
+    
+    print(f"Looking for file at: {file_path}")
+    print(f"Directory exists: {os.path.exists(batch_path)}")
+    print(f"File exists: {os.path.exists(file_path)}")
+    
+    if os.path.exists(file_path) and os.path.isfile(file_path):
+        print(f"File found, sending: {file_path}")
+        try:
+            response = send_file(
+                file_path,
+                mimetype='application/pdf',
+                as_attachment=True,
+                download_name=file_name
+            )
+            
+            # Explicitly set headers to force download
+            response.headers['Content-Disposition'] = f'attachment; filename="{file_name}"'
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            
+            return response
+        except Exception as e:
+            print(f"Error sending file: {str(e)}")
+            return jsonify({'error': f'Error sending file: {str(e)}'}), 500
+    
+    # If file not found in specific batch
+    print(f"File not found at specific path: {file_path}")
+    
+    # Debug: List all files in the batch directory
+    if os.path.exists(batch_path):
+        print(f"Files in {batch_path}:")
+        for f in os.listdir(batch_path):
+            print(f"  - {f}")
         
-        print(f"Looking for file at: {file_path}")
-        print(f"Directory exists: {os.path.exists(batch_path)}")
-        print(f"File exists: {os.path.exists(file_path)}")
-        
-        if os.path.exists(file_path) and os.path.isfile(file_path):
-            print(f"File found, sending: {file_path}")
+        # Try to find any PDF file if the exact filename wasn't found
+        pdf_files = [f for f in os.listdir(batch_path) if f.endswith('.pdf')]
+        if pdf_files:
+            alt_file_path = os.path.join(batch_path, pdf_files[0])
+            print(f"Found alternative PDF file: {pdf_files[0]}")
             try:
-                return send_file(
-                    file_path,
+                response = send_file(
+                    alt_file_path,
                     mimetype='application/pdf',
                     as_attachment=True,
                     download_name=file_name
                 )
-            except Exception as e:
-                print(f"Error sending file: {str(e)}")
-                return jsonify({'error': f'Error sending file: {str(e)}'}), 500
-        else:
-            print(f"File not found at specific path: {file_path}")
-            
-            # Debug: List all files in the batch directory
-            if os.path.exists(batch_path):
-                print(f"Files in {batch_path}:")
-                for f in os.listdir(batch_path):
-                    print(f"  - {f}")
                 
-                # Try to find a PDF file if the exact filename wasn't found
-                pdf_files = [f for f in os.listdir(batch_path) if f.endswith('.pdf')]
-                if pdf_files:
-                    alt_file_path = os.path.join(batch_path, pdf_files[0])
-                    print(f"Found alternative PDF file: {pdf_files[0]}")
-                    try:
-                        return send_file(
-                            alt_file_path,
-                            mimetype='application/pdf',
-                            as_attachment=True,
-                            download_name=file_name
-                        )
-                    except Exception as e:
-                        print(f"Error sending alternative file: {str(e)}")
-                        return jsonify({'error': f'Error sending alternative file: {str(e)}'}), 500
-            
-            return jsonify({'error': 'File not found in specified batch'}), 404
+                # Set force download headers
+                response.headers['Content-Disposition'] = f'attachment; filename="{file_name}"'
+                response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+                
+                return response
+            except Exception as e:
+                print(f"Error sending alternative file: {str(e)}")
+                return jsonify({'error': f'Error sending alternative file: {str(e)}'}), 500
     
-    # Search in all batch directories if no specific batch_id provided
-    for batch_dir in os.listdir('output'):
-        batch_path = os.path.join('output', batch_dir)
-        if os.path.isdir(batch_path):
-            file_path = os.path.join(batch_path, file_name)
-            if os.path.exists(file_path) and os.path.isfile(file_path):
-                try:
-                    return send_file(
-                        file_path,
-                        mimetype='application/pdf',
-                        as_attachment=True,
-                        download_name=file_name
-                    )
-                except Exception as e:
-                    print(f"Error sending file from all batches: {str(e)}")
-                    continue  # Try next batch
-    
-    print(f"File not found in any batch: {file_name}")
-    return jsonify({'error': 'File not found in any batch directory'}), 404
+    return jsonify({'error': 'File not found in specified batch'}), 404
 
+# Also update the download-all endpoint
 @app.route('/api/forms/download-all', methods=['GET'])
 def download_all_forms():
     batch_id = request.args.get('batchId')
@@ -396,15 +396,24 @@ def download_all_forms():
         
         memory_file.seek(0)
         
-        return send_file(
+        response = send_file(
             memory_file,
             mimetype='application/zip',
             as_attachment=True,
             download_name=f'forms_{batch_id}.zip'
         )
+        
+        # Set force download headers
+        response.headers['Content-Disposition'] = f'attachment; filename="forms_{batch_id}.zip"'
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        
+        return response
     except Exception as e:
         print(f"Error creating ZIP file: {str(e)}")
         return jsonify({'error': f'Error creating ZIP file: {str(e)}'}), 500
+
 
 @app.route('/api/forms/pdf-debug', methods=['GET'])
 def debug_pdf_serving():
