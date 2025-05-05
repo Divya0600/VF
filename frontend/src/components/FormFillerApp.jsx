@@ -969,17 +969,50 @@ const FormFillerApp = () => {
   );
 
   // Download a single form
-const downloadForm = (fileName) => {
-    window.location.href = `/api/forms/download?file=${encodeURIComponent(fileName)}`;
-  };
-  
-  // Download all forms as zip
-  const downloadAllForms = () => {
-    if (processingResults && processingResults.batchId) {
-      window.location.href = `/api/forms/download-all?batchId=${processingResults.batchId}`;
+// Download functionality for FormFillerApp.jsx
+
+// Download a single processed form
+  const downloadForm = (fileName) => {
+    try {
+      // Create a direct link to trigger the download
+      const downloadUrl = `/api/forms/download?file=${encodeURIComponent(fileName)}`;
+      
+      // Create a temporary anchor element to trigger the download
+      const anchor = document.createElement('a');
+      anchor.href = downloadUrl;
+      anchor.download = fileName; // This suggests the filename to save as
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+    } catch (error) {
+      console.error('Error downloading file:', error);
+      setError(`Failed to download ${fileName}. Please try again.`);
     }
   };
-
+  
+  // Download all processed forms as zip
+  const downloadAllForms = () => {
+    try {
+      if (!processingResults || !processingResults.batchId) {
+        setError('No batch ID found for download');
+        return;
+      }
+      
+      // Create a direct link to trigger the download
+      const downloadUrl = `/api/forms/download-all?batchId=${encodeURIComponent(processingResults.batchId)}`;
+      
+      // Create a temporary anchor element to trigger the download
+      const anchor = document.createElement('a');
+      anchor.href = downloadUrl;
+      anchor.download = `${processingResults.batchId}.zip`; // This suggests the filename to save as
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+    } catch (error) {
+      console.error('Error downloading batch files:', error);
+      setError('Failed to download batch files. Please try again.');
+    }
+  };
   // Progress Steps
   const renderProgressSteps = () => (
     <div className="mb-8">
