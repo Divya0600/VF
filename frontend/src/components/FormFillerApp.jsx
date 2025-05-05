@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import PdfPreviewComponent from './PdfPreviewComponent';
 import { 
   AlertCircle, ArrowRight, CheckCircle, ChevronDown, ChevronLeft, ChevronRight,
   Download, Eye, File, FileText, Filter, Info, Search, X, Database, 
-  Upload, Loader, RefreshCw, List, Grid, ArrowUpDown, Calendar
+  Upload, Loader, RefreshCw, List, Grid, ArrowUpDown, Calendar, ExternalLink
 } from 'lucide-react';
-
 const FormFillerApp = () => {
   // State declarations
   const [step, setStep] = useState(1);
@@ -220,17 +220,6 @@ const FormFillerApp = () => {
     }, 2000);
   };
 
-  // Download a processed form
-  const downloadForm = (fileName) => {
-    alert(`Downloading file: ${fileName}`);
-    // In a real implementation, this would initiate a download from the backend
-  };
-
-  // Download all processed forms as zip
-  const downloadAllForms = () => {
-    alert(`Downloading all files for batch: ${processingResults.batchId}`);
-    // In a real implementation, this would initiate a download from the backend
-  };
 
   const resetForm = () => {
     setStep(1);
@@ -288,58 +277,18 @@ const FormFillerApp = () => {
   );
 
   // Preview Modal
-  const renderPreviewModal = () => {
-    if (!showPreviewModal) return null;
-    
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col">
-          <div className="flex items-center justify-between p-6 border-b border-gray-100">
-            <h3 className="text-xl font-semibold text-gray-800">
-              Form Preview: {selectedTemplate?.name}
-            </h3>
-            <button 
-              className="p-2 rounded-full hover:bg-gray-100"
-              onClick={() => setShowPreviewModal(false)}
-            >
-              <X size={20} />
-            </button>
-          </div>
-          
-          <div className="flex-1 p-6 overflow-auto">
-            <div className="bg-gray-100 rounded-lg p-8 flex items-center justify-center min-h-[60vh]">
-              <div className="text-center">
-                <FileText size={64} className="mx-auto text-gray-400 mb-4" />
-                <p className="text-gray-600 mb-2">Preview of {selectedTemplate?.name}</p>
-                <p className="text-sm text-gray-500">{selectedTemplate?.type.toUpperCase()} Template</p>
-              </div>
-            </div>
-          </div>
-          
-          <div className="p-6 border-t border-gray-100 flex justify-end gap-3">
-            <button 
-              className="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50"
-              onClick={() => setShowPreviewModal(false)}
-            >
-              Close Preview
-            </button>
-            {selectedTemplate && (
-              <button 
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                onClick={() => {
-                  setShowPreviewModal(false);
-                  setSelectedTemplate(selectedTemplate);
-                  setStep(2);
-                }}
-              >
-                Use This Template
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
+  
+  const renderPreviewModal = () => (
+    <PdfPreviewComponent
+      showModal={showPreviewModal}
+      template={selectedTemplate}
+      onClose={() => setShowPreviewModal(false)}
+      onUseTemplate={(template) => {
+        setSelectedTemplate(template);
+        setStep(2);
+      }}
+    />
+  );
 
   // STEP 1: Template Selection with Search and List View
   const renderTemplateSelection = () => (
@@ -1018,6 +967,18 @@ const FormFillerApp = () => {
       </button>
     </div>
   );
+
+  // Download a single form
+const downloadForm = (fileName) => {
+    window.location.href = `/api/forms/download?file=${encodeURIComponent(fileName)}`;
+  };
+  
+  // Download all forms as zip
+  const downloadAllForms = () => {
+    if (processingResults && processingResults.batchId) {
+      window.location.href = `/api/forms/download-all?batchId=${processingResults.batchId}`;
+    }
+  };
 
   // Progress Steps
   const renderProgressSteps = () => (

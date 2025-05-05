@@ -27,6 +27,43 @@ def get_form_types():
     
     return jsonify({'formTypes': form_types})
 
+
+# Make sure your preview_form endpoint in server.py properly serves PDF files:
+
+@app.route('/api/forms/preview', methods=['GET'])
+def preview_form():
+    form_type = request.args.get('formType')
+    
+    if not form_type:
+        return jsonify({'error': 'Form type not specified'}), 400
+    
+    # Load form configuration
+    config = load_form_config(form_type)
+    
+    if not config or 'empty_form_file' not in config:
+        return jsonify({'error': 'Form not found'}), 404
+    
+    # Check if the file exists
+    pdf_path = config['empty_form_file']
+    if not os.path.exists(pdf_path):
+        return jsonify({'error': f'Form template file not found: {pdf_path}'}), 404
+    
+    # Log the path for debugging
+    print(f"Serving PDF: {pdf_path}")
+    
+    # Return the empty form PDF with correct headers
+    try:
+        return send_file(
+            pdf_path, 
+            mimetype='application/pdf',
+            as_attachment=False,  # Important: set to False to display in browser
+            download_name=f"{form_type}.pdf"  # Set a proper file name
+        )
+    except Exception as e:
+        print(f"Error serving PDF: {str(e)}")
+        return jsonify({'error': f'Error serving PDF: {str(e)}'}), 500
+
+
 @app.route('/api/forms/templates', methods=['GET'])
 def get_templates():
     forms = list_available_forms()
@@ -45,16 +82,7 @@ def get_templates():
     
     return jsonify({'templates': templates})
 
-@app.route('/api/forms/preview', methods=['GET'])
-def preview_form():
-    form_type = request.args.get('formType')
-    config = load_form_config(form_type)
-    
-    if not config or 'empty_form_file' not in config:
-        return jsonify({'error': 'Form not found'}), 404
-    
-    # Return the empty form PDF
-    return send_file(config['empty_form_file'], mimetype='application/pdf')
+
 
 @app.route('/api/forms/preview-csv', methods=['POST'])
 def preview_csv():
