@@ -480,13 +480,28 @@ def fill_pdf_form(form_type, form_data, output_file=None):
         empty_form = config.get("empty_form_file", os.path.join(FORMS_DIR, "empty_form.pdf"))
         temp_overlay = config.get("temp_overlay_file", TEMP_OVERLAY)
         
-        # Use custom output file if provided, otherwise use config
-        if output_file:
-            output_path = output_file
-        else:
-            output_path = config.get("output_file", os.path.join(OUTPUT_DIR, "filled_form.pdf"))
+        # Get basename of empty form for output naming
+        input_basename = os.path.basename(empty_form)
+        input_name, input_ext = os.path.splitext(input_basename)
         
-        # Rest of the function...
+        # Use custom output file if provided, otherwise use config and add 'processed_' prefix
+        if output_file:
+            # Check if we need to add 'processed_' prefix to the output filename
+            output_dir = os.path.dirname(output_file)
+            output_basename = os.path.basename(output_file)
+            if not output_basename.startswith('processed_'):
+                output_basename = f"processed_{output_basename}"
+            output_path = os.path.join(output_dir, output_basename)
+        else:
+            # Use config path but add 'processed_' prefix
+            default_output_path = config.get("output_file", os.path.join(OUTPUT_DIR, f"filled_{input_name}{input_ext}"))
+            output_dir = os.path.dirname(default_output_path)
+            output_basename = os.path.basename(default_output_path)
+            if not output_basename.startswith('processed_'):
+                output_basename = f"processed_{output_basename}"
+            output_path = os.path.join(output_dir, output_basename)
+            
+        # Rest of the function implementation continues here...
         
         # Check if empty form exists
         if not check_path_exists(empty_form, f"Empty form file not found: {empty_form}"):
@@ -551,8 +566,6 @@ def fill_pdf_form(form_type, form_data, output_file=None):
     except Exception as e:
         logger.exception(f"Error filling PDF form: {e}")
         return False
-
-
 def read_csv_input(csv_file):
     """Read form data from a CSV file"""
     if not check_path_exists(csv_file, f"CSV file not found: {csv_file}"):

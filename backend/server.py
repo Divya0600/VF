@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file, Response
+from flask import Flask, request, jsonify, send_file, Response, make_response
 import os
 import json
 import tempfile
@@ -6,6 +6,7 @@ import zipfile
 import io
 import csv
 from pdf_form_filler import load_form_config, list_available_forms, fill_pdf_form, process_batch
+
 
 app = Flask(__name__)
 
@@ -212,9 +213,15 @@ def process_forms():
     # Create a unique batch ID
     import time
     batch_id = f"batch_{int(time.time())}"
-    output_dir = os.path.join('output', batch_id)
     
-    # Ensure output directory exists
+    # Create new directory structure based on file type
+    file_type = "pdf"  # Default to PDF
+    output_type_dir = os.path.join('output', file_type)
+    output_dir = os.path.join(output_type_dir, batch_id)
+    
+    # Ensure output directories exist
+    if not os.path.exists(output_type_dir):
+        os.makedirs(output_type_dir)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
@@ -233,7 +240,7 @@ def process_forms():
         if not os.path.exists(temp_csv_path):
             return jsonify({'error': 'Failed to save uploaded file'}), 500
         
-        # Process the batch
+        # Process the batch with updated output directory
         success = process_batch(form_type, temp_csv_path, output_dir)
         
         # Count the number of files in the output directory
@@ -244,7 +251,7 @@ def process_forms():
                     file_path = os.path.join(output_dir, filename)
                     file_size = os.path.getsize(file_path)
                     files.append({
-                        'name': filename,  # Make sure this is the actual filename
+                        'name': filename,
                         'size': f"{file_size / 1024:.2f} KB",
                         'date': time.strftime('%Y-%m-%d', time.gmtime(os.path.getmtime(file_path)))
                     })
@@ -259,13 +266,12 @@ def process_forms():
             'success': success,
             'batchId': batch_id,
             'successCount': success_count,
-            'successRate': "100%" if success_count > 0 else "0%",  # Simplified for now
+            'successRate': "100%" if success_count > 0 else "0%",
             'files': files
         })
         
     except Exception as e:
         import traceback
-        # Print detailed error for debugging
         print(f"Error processing forms: {str(e)}")
         print(traceback.format_exc())
         
@@ -277,7 +283,6 @@ def process_forms():
                 pass
                 
         return jsonify({'error': f'Error processing forms: {str(e)}'}), 500
-
 
 def count_csv_rows(csv_file):
     """Count the number of rows in a CSV file"""
@@ -294,91 +299,57 @@ def count_csv_rows(csv_file):
 
 # Modify the download_form function in server.py
 # Update the download_form function in server.py
+
+
 @app.route('/api/forms/download', methods=['GET'])
 def download_form():
     file_name = request.args.get('file')
     batch_id = request.args.get('batchId')
     
-    print(f"Download request received: file={file_name}, batch_id={batch_id}")
+    # Check the most likely path first
+    file_path = os.path.join('output', 'pdf', batch_id, file_name)
     
-    if not file_name:
-        return jsonify({'error': 'File name not specified'}), 400
-        
-    if not batch_id:
-        return jsonify({'error': 'Batch ID not specified'}), 400
+    if not os.path.exists(file_path):
+        # Fallback to legacy path if needed
+        file_path = os.path.join('output', batch_id, file_name)
     
-    # Look in the specific batch directory
-    batch_path = os.path.join('output', batch_id)
-    file_path = os.path.join(batch_path, file_name)
+    if os.path.exists(file_path):
+        # Force file download with explicit headers
+        return send_file(
+            file_path,
+            as_attachment=True,
+            download_name=file_name,
+            mimetype='application/octet-stream'
+        )
     
-    print(f"Looking for file at: {file_path}")
-    print(f"Directory exists: {os.path.exists(batch_path)}")
-    print(f"File exists: {os.path.exists(file_path)}")
-    
-    if os.path.exists(file_path) and os.path.isfile(file_path):
-        print(f"File found, sending: {file_path}")
-        try:
-            response = send_file(
-                file_path,
-                mimetype='application/pdf',
-                as_attachment=True,
-                download_name=file_name
-            )
-            
-            # Explicitly set headers to force download
-            response.headers['Content-Disposition'] = f'attachment; filename="{file_name}"'
-            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-            response.headers['Pragma'] = 'no-cache'
-            response.headers['Expires'] = '0'
-            
-            return response
-        except Exception as e:
-            print(f"Error sending file: {str(e)}")
-            return jsonify({'error': f'Error sending file: {str(e)}'}), 500
-    
-    # If file not found in specific batch
-    print(f"File not found at specific path: {file_path}")
-    
-    # Debug: List all files in the batch directory
-    if os.path.exists(batch_path):
-        print(f"Files in {batch_path}:")
-        for f in os.listdir(batch_path):
-            print(f"  - {f}")
-        
-        # Try to find any PDF file if the exact filename wasn't found
-        pdf_files = [f for f in os.listdir(batch_path) if f.endswith('.pdf')]
-        if pdf_files:
-            alt_file_path = os.path.join(batch_path, pdf_files[0])
-            print(f"Found alternative PDF file: {pdf_files[0]}")
-            try:
-                response = send_file(
-                    alt_file_path,
-                    mimetype='application/pdf',
-                    as_attachment=True,
-                    download_name=file_name
-                )
-                
-                # Set force download headers
-                response.headers['Content-Disposition'] = f'attachment; filename="{file_name}"'
-                response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-                
-                return response
-            except Exception as e:
-                print(f"Error sending alternative file: {str(e)}")
-                return jsonify({'error': f'Error sending alternative file: {str(e)}'}), 500
-    
-    return jsonify({'error': 'File not found in specified batch'}), 404
+    return jsonify({'error': 'File not found'}), 404
 
-# Also update the download-all endpoint
+
 @app.route('/api/forms/download-all', methods=['GET'])
 def download_all_forms():
     batch_id = request.args.get('batchId')
     if not batch_id:
         return jsonify({'error': 'Batch ID not specified'}), 400
     
-    batch_dir = os.path.join('output', batch_id)
-    if not os.path.exists(batch_dir):
-        return jsonify({'error': f'Batch not found: {batch_dir}'}), 404
+    # Check multiple possible directory paths
+    batch_paths = [
+        os.path.join('output', batch_id),
+        os.path.join('output', 'pdf', batch_id),
+        os.path.join('output', 'email', batch_id)
+    ]
+    
+    # Find which path exists
+    batch_dir = None
+    for path in batch_paths:
+        print(f"Checking batch path: {path}")
+        if os.path.exists(path):
+            batch_dir = path
+            print(f"Found batch directory: {batch_dir}")
+            break
+    
+    if not batch_dir:
+        print(f"Batch directory not found. Checked paths: {batch_paths}")
+        return jsonify({'error': f'Batch not found'}), 404
     
     # Create a ZIP file in memory
     memory_file = io.BytesIO()
@@ -390,25 +361,22 @@ def download_all_forms():
                 if os.path.isfile(file_path):
                     zf.write(file_path, file_name)
                     file_count += 1
+                    print(f"Added to zip: {file_name}")
             
             if file_count == 0:
                 return jsonify({'error': 'No files found in batch directory'}), 404
         
         memory_file.seek(0)
         
-        response = send_file(
-            memory_file,
-            mimetype='application/zip',
-            as_attachment=True,
-            download_name=f'forms_{batch_id}.zip'
-        )
-        
-        # Set force download headers
+        # Create response with the zip file
+        response = make_response(memory_file.getvalue())
+        response.headers['Content-Type'] = 'application/zip'
         response.headers['Content-Disposition'] = f'attachment; filename="forms_{batch_id}.zip"'
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
         
+        print(f"Sending zip with {file_count} files from {batch_dir}")
         return response
     except Exception as e:
         print(f"Error creating ZIP file: {str(e)}")

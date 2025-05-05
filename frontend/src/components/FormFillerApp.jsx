@@ -1048,36 +1048,12 @@ const FormFillerApp = () => {
   // Replace both download functions in FormFillerApp.jsx
 
 // Download a single form
+  // Download a single form
   const downloadForm = (fileName, batchId) => {
-    try {
-      console.log(`Attempting to download file: ${fileName} from batch: ${batchId}`);
-      
-      if (!batchId) {
-        console.error('Missing batchId for download', processingResults);
-        alert('Error: Missing batch ID. Please try again or reload the page.');
-        return;
-      }
-      
-      // Create direct download link with iframe approach to prevent navigation issues
-      const iframe = document.createElement('iframe');
-      iframe.style.display = 'none';
-      document.body.appendChild(iframe);
-      
-      iframe.onload = () => {
-        // Remove iframe after loading (success or error)
-        setTimeout(() => {
-          document.body.removeChild(iframe);
-        }, 1000);
-      };
-      
-      // Set src to download URL
-      iframe.src = `/api/forms/download?file=${encodeURIComponent(fileName)}&batchId=${batchId}`;
-    } catch (error) {
-      console.error('Error downloading file:', error);
-      alert('Error downloading file. Please try again.');
-    }
-  };
-
+    // Direct browser download - simplest approach
+    window.location.href = `/api/forms/download?file=${encodeURIComponent(fileName)}&batchId=${batchId}`;
+  }
+  
   // Download all forms as zip
   const downloadAllForms = (e) => {
     if (e) {
@@ -1093,26 +1069,29 @@ const FormFillerApp = () => {
     
     try {
       const batchId = processingResults.batchId;
-      const url = `/api/forms/download-all?batchId=${batchId}`;
+      const url = `/api/forms/download-all?batchId=${batchId}&t=${Date.now()}`; // Add timestamp to prevent caching
       
-      // Use iframe approach for reliable downloads
-      const iframe = document.createElement('iframe');
-      iframe.style.display = 'none';
-      document.body.appendChild(iframe);
+      // Use direct link for download
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `forms_${batchId}.zip`);
+      link.setAttribute('target', '_blank');
       
-      iframe.onload = () => {
-        setTimeout(() => {
-          document.body.removeChild(iframe);
-        }, 1000);
-      };
+      document.body.appendChild(link);
+      link.click();
       
-      iframe.src = url;
+      setTimeout(() => {
+        document.body.removeChild(link);
+      }, 1000);
+      
       console.log('Downloading all forms:', batchId);
     } catch (error) {
       console.error('Error downloading files:', error);
       alert('Error downloading files. Please try again.');
     }
   };
+
+
   // Progress Steps
   const renderProgressSteps = () => (
     <div className="mb-8">
