@@ -27,12 +27,12 @@ def get_form_types():
     
     return jsonify({'formTypes': form_types})
 
-
-# Make sure your preview_form endpoint in server.py properly serves PDF files:
+# Replace the existing preview_form endpoint in server.py
 
 @app.route('/api/forms/preview', methods=['GET'])
 def preview_form():
     form_type = request.args.get('formType')
+    raw_mode = request.args.get('raw', 'false').lower() == 'true'
     
     if not form_type:
         return jsonify({'error': 'Form type not specified'}), 400
@@ -41,29 +41,105 @@ def preview_form():
     config = load_form_config(form_type)
     
     if not config or 'empty_form_file' not in config:
-        return jsonify({'error': 'Form not found'}), 404
+        return jsonify({'error': 'Form not found or missing empty_form_file in config'}), 404
     
     # Check if the file exists
     pdf_path = config['empty_form_file']
     if not os.path.exists(pdf_path):
-        return jsonify({'error': f'Form template file not found: {pdf_path}'}), 404
+        print(f"PDF file not found at: {pdf_path}")
+        print(f"Current working directory: {os.getcwd()}")
+        return jsonify({
+            'error': 'Form template file not found', 
+            'path': pdf_path,
+            'cwd': os.getcwd()
+        }), 404
     
     # Log the path for debugging
     print(f"Serving PDF: {pdf_path}")
     
     # Return the empty form PDF with correct headers
     try:
-        return send_file(
-            pdf_path, 
-            mimetype='application/pdf',
-            as_attachment=False,  # Important: set to False to display in browser
-            download_name=f"{form_type}.pdf"  # Set a proper file name
-        )
+        # Explicitly read the file and return its contents
+        if raw_mode:
+            with open(pdf_path, 'rb') as pdf_file:
+                pdf_data = pdf_file.read()
+            
+            response = Response(pdf_data, mimetype='application/pdf')
+            response.headers['Content-Disposition'] = f'inline; filename="{form_type}.pdf"'
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            return response
+        else:
+            # Standard send_file approach
+            response = send_file(
+                pdf_path, 
+                mimetype='application/pdf',
+                as_attachment=False,
+                download_name=f"{form_type}.pdf"
+            )
+            
+            # Add headers to prevent caching issues
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            response.headers['Content-Type'] = 'application/pdf'
+            return response
+            
     except Exception as e:
         print(f"Error serving PDF: {str(e)}")
-        return jsonify({'error': f'Error serving PDF: {str(e)}'}), 500
+        # Return more detailed error information
+        return jsonify({
+            'error': 'Error serving PDF',
+            'message': str(e),
+            'path': pdf_path,
+            'file_exists': os.path.exists(pdf_path),
+            'file_size': os.path.getsize(pdf_path) if os.path.exists(pdf_path) else 0
+        }), 500
 
 
+# Add this function to help you debug the PDF file locations
+@app.route('/api/forms/file-check', methods=['GET'])
+def check_form_files():
+    """Debug endpoint to check all form files and their existence"""
+    form_files = {}
+    forms = list_available_forms()
+    
+    # First check configuration directory
+    config_dir = os.path.join(os.getcwd(), 'forms')
+    if os.path.exists(config_dir):
+        config_files = [f for f in os.listdir(config_dir) if f.endswith('.json')]
+    else:
+        config_files = []
+    
+    for form_id in forms:
+        config = load_form_config(form_id)
+        if not config:
+            form_files[form_id] = {
+                'config_found': False,
+                'pdf_path': None,
+                'pdf_exists': False
+            }
+            continue
+            
+        pdf_path = config.get('empty_form_file', None)
+        pdf_exists = pdf_path and os.path.exists(pdf_path)
+        
+        form_files[form_id] = {
+            'config_found': True,
+            'pdf_path': pdf_path,
+            'pdf_exists': pdf_exists,
+            'pdf_size': os.path.getsize(pdf_path) if pdf_exists else 0
+        }
+    
+    return jsonify({
+        'working_directory': os.getcwd(),
+        'config_directory': config_dir,
+        'config_directory_exists': os.path.exists(config_dir),
+        'config_files': config_files if os.path.exists(config_dir) else [],
+        'form_files': form_files
+    })
+    
 @app.route('/api/forms/templates', methods=['GET'])
 def get_templates():
     forms = list_available_forms()
@@ -229,6 +305,62 @@ def download_all_forms():
         download_name=f'{batch_id}.zip'
     )
 
+
+
+@app.route('/api/forms/pdf-debug', methods=['GET'])
+def debug_pdf_serving():
+    """Debug endpoint to test PDF serving capabilities"""
+    form_type = request.args.get('formType')
+    
+    if not form_type:
+        return jsonify({
+            'status': 'error',
+            'message': 'Form type not specified',
+            'available_forms': list_available_forms()
+        }), 400
+    
+    # Load form configuration
+    config = load_form_config(form_type)
+    
+    if not config:
+        return jsonify({
+            'status': 'error',
+            'message': 'Form config not found',
+            'form_type': form_type,
+            'available_forms': list_available_forms()
+        }), 404
+        
+    if 'empty_form_file' not in config:
+        return jsonify({
+            'status': 'error',
+            'message': 'Form template file path not defined in config',
+            'config_keys': list(config.keys())
+        }), 404
+    
+    # Check if the file exists
+    pdf_path = config['empty_form_file']
+    file_exists = os.path.exists(pdf_path)
+    
+    if not file_exists:
+        return jsonify({
+            'status': 'error',
+            'message': 'PDF file not found at specified path',
+            'pdf_path': pdf_path,
+            'working_directory': os.getcwd(),
+            'file_exists': file_exists
+        }), 404
+    
+    # Return file info instead of the actual file
+    file_size = os.path.getsize(pdf_path)
+    
+    return jsonify({
+        'status': 'success',
+        'message': 'PDF file found and accessible',
+        'pdf_path': pdf_path,
+        'file_size': f"{file_size / 1024:.2f} KB",
+        'mime_type': 'application/pdf',
+        'preview_url': f"/api/forms/preview?formType={form_type}"
+    })
 if __name__ == '__main__':
     # Ensure output directory exists
     if not os.path.exists('output'):
