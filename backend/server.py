@@ -10,21 +10,18 @@ from pdf_form_filler import load_form_config, list_available_forms, fill_pdf_for
 
 app = Flask(__name__)
 
-# API endpoints for form operations
 @app.route('/api/forms/types', methods=['GET'])
 def get_form_types():
     # List available form configurations
     forms = list_available_forms()
-    form_types = []
     
-    for form_id in forms:
-        config = load_form_config(form_id)
-        if config:
-            form_types.append({
-                'id': form_id,
-                'name': config.get('name', form_id),
-                'type': 'pdf'  # You could determine this based on the form config
-            })
+    # Hardcoded list of form types you want to display
+    form_types = [
+        
+        {'id': 'pdf', 'name': 'PDF Forms'},
+        {'id': 'email', 'name': 'Email Templates'},
+        {'id': 'tif', 'name': 'TIF Images'}
+    ]
     
     return jsonify({'formTypes': form_types})
 
@@ -143,6 +140,7 @@ def check_form_files():
     
 @app.route('/api/forms/templates', methods=['GET'])
 def get_templates():
+    # First get all PDF forms from config files
     forms = list_available_forms()
     templates = []
     
@@ -153,13 +151,69 @@ def get_templates():
                 'id': form_id,
                 'name': config.get('name', form_id),
                 'description': config.get('description', ''),
-                'type': 'pdf',  # You could determine this based on the form config
-                'lastModified': '2025-03-18'  # You could get this from the file
+                'type': 'pdf',  # All these are PDF forms
+                'lastModified': '2025-03-18'
             })
+    
+    # Now add email templates (which don't have config files)
+    email_dir = os.path.join('email', 'input')
+    if os.path.exists(email_dir):
+        for filename in os.listdir(email_dir):
+            if filename.endswith('.eml'):
+                template_id = os.path.splitext(filename)[0]
+                templates.append({
+                    'id': template_id,
+                    'name': template_id.replace('_', ' ').title(),  # Create a name from the filename
+                    'description': 'Email template',
+                    'type': 'email',
+                    'lastModified': '2025-03-18'
+                })
     
     return jsonify({'templates': templates})
 
-
+@app.route('/api/forms/preview-email', methods=['GET'])
+def preview_email_template():
+    template_id = request.args.get('templateId')
+    
+    if not template_id:
+        return jsonify({'error': 'Email template ID not specified'}), 400
+    
+    # Find the email template file
+    template_path = os.path.join('email', 'input', f"{template_id}.eml")
+    
+    if not os.path.exists(template_path):
+        return jsonify({'error': 'Email template not found'}), 404
+    
+    # Read the email template content
+    try:
+        with open(template_path, 'r', encoding='utf-8') as f:
+            email_content = f.read()
+        
+        # Parse email to extract subject and body
+        from email import message_from_string
+        
+        msg = message_from_string(email_content)
+        subject = msg.get('Subject', '(No Subject)')
+        
+        # Get body content (simplified approach)
+        body = ''
+        if msg.is_multipart():
+            for part in msg.walk():
+                content_type = part.get_content_type()
+                if content_type == 'text/plain' or content_type == 'text/html':
+                    body = part.get_payload(decode=True).decode('utf-8', errors='replace')
+                    break
+        else:
+            body = msg.get_payload(decode=True).decode('utf-8', errors='replace')
+        
+        return jsonify({
+            'templateId': template_id,
+            'subject': subject,
+            'body': body,
+            'rawContent': email_content
+        })
+    except Exception as e:
+        return jsonify({'error': f'Error reading email template: {str(e)}'}), 500
 
 @app.route('/api/forms/preview-csv', methods=['POST'])
 def preview_csv():

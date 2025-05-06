@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import PdfPreviewComponent from './PdfPreviewComponent';
+import EmailPreviewComponent from './EmailPreviewComponent';
 import { 
   AlertCircle, ArrowRight, CheckCircle, ChevronDown, ChevronLeft, ChevronRight,
   Download, Eye, File, FileText, Filter, Info, Search, X, Database, 
@@ -13,6 +14,8 @@ const FormFillerApp = () => {
   const [selectedFormType, setSelectedFormType] = useState(null);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [csvFile, setCsvFile] = useState(null);
+  const [showEmailPreview, setShowEmailPreview] = useState(false);
+  const [selectedEmailTemplate, setSelectedEmailTemplate] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [previewData, setPreviewData] = useState(null);
@@ -117,9 +120,16 @@ const FormFillerApp = () => {
 
   // Preview empty form template
   const previewTemplate = (template) => {
-    setShowPreviewModal(true);
-    setSelectedTemplate(template);
+    if (template.type === 'email') {
+      setShowEmailPreview(true);
+      setSelectedEmailTemplate(template);
+    } else {
+      // Default to PDF preview
+      setShowPreviewModal(true);
+      setSelectedTemplate(template);
+    }
   };
+  
 
   // Handle file upload
   const handleFileUpload = async (event) => {
@@ -1251,7 +1261,17 @@ const FormFillerApp = () => {
           </>
         )}
       </div>
-      
+      {showEmailPreview && (
+        <EmailPreviewComponent
+          showModal={showEmailPreview}
+          template={selectedEmailTemplate}
+          onClose={() => setShowEmailPreview(false)}
+          onUseTemplate={(template) => {
+            setSelectedTemplate(template);
+            setStep(2);
+          }}
+        />
+      )}
       {renderPreviewModal()}
       {process.env.NODE_ENV === 'development' && renderDebugInfo()}
     </div>
