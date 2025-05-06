@@ -121,10 +121,12 @@ const FormFillerApp = () => {
   // Preview empty form template
   const previewTemplate = (template) => {
     if (template.type === 'email') {
+      // Only set email-specific state
       setShowEmailPreview(true);
       setSelectedEmailTemplate(template);
+      // DO NOT set selectedTemplate here
     } else {
-      // Default to PDF preview
+      // Only set PDF-specific state
       setShowPreviewModal(true);
       setSelectedTemplate(template);
     }
@@ -353,14 +355,29 @@ const FormFillerApp = () => {
   // Preview Modal
   
   const renderPreviewModal = () => (
-    <PdfPreviewComponent
-      showModal={showFilledPreview}
-      template={null}
-      isFilledForm={true}
-      filledFormInfo={previewFilledForm}
-      onClose={() => setShowFilledPreview(false)}
-      onUseTemplate={null}
-    />
+    <>
+      {/* PDF Preview Modal */}
+      <PdfPreviewComponent
+        showModal={showPreviewModal}
+        template={selectedTemplate}
+        onClose={() => setShowPreviewModal(false)}
+        onUseTemplate={(template) => {
+          setSelectedTemplate(template);
+          setStep(2);
+        }}
+      />
+      
+      {/* Email Preview Modal */}
+      <EmailPreviewComponent
+        showModal={showEmailPreview}
+        template={selectedEmailTemplate}
+        onClose={() => setShowEmailPreview(false)}
+        onUseTemplate={(template) => {
+          setSelectedTemplate(template);
+          setStep(2);
+        }}
+      />
+    </>
   );
 
   // STEP 1: Template Selection with Search and List View
@@ -1261,17 +1278,7 @@ const FormFillerApp = () => {
           </>
         )}
       </div>
-      {showEmailPreview && (
-        <EmailPreviewComponent
-          showModal={showEmailPreview}
-          template={selectedEmailTemplate}
-          onClose={() => setShowEmailPreview(false)}
-          onUseTemplate={(template) => {
-            setSelectedTemplate(template);
-            setStep(2);
-          }}
-        />
-      )}
+      
       {renderPreviewModal()}
       {process.env.NODE_ENV === 'development' && renderDebugInfo()}
     </div>
