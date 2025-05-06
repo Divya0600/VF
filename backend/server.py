@@ -155,6 +155,7 @@ def preview_form():
             'file_size': os.path.getsize(pdf_path) if os.path.exists(pdf_path) else 0
         }), 500
 
+# Update existing preview-email endpoint or add this new one
 @app.route('/api/forms/preview-email', methods=['GET'])
 def preview_email_template():
     template_id = request.args.get('templateId')
@@ -168,36 +169,148 @@ def preview_email_template():
     if not os.path.exists(template_path):
         return jsonify({'error': 'Email template not found'}), 404
     
-    # Read the email template content
+    # Parse the email template content using the same logic as processed emails
     try:
-        with open(template_path, 'r', encoding='utf-8') as f:
-            email_content = f.read()
+        from email import message_from_bytes
+        import email.utils
+        from email.header import decode_header
         
-        # Parse email to extract subject and body
-        from email import message_from_string
+        # Helper function to try multiple encodings
+        def try_decode_with_encodings(content, encodings=['utf-8', 'iso-8859-1', 'windows-1252']):
+            if not content:
+                return ""
+            
+            for encoding in encodings:
+                try:
+                    return content.decode(encoding)
+                except UnicodeDecodeError:
+                    continue
+            # Fallback with replacements
+            return content.decode('utf-8', errors='replace')
         
-        msg = message_from_string(email_content)
+        # Read file as binary
+        with open(template_path, 'rb') as f:
+            file_content = f.read()
+        
+        # Parse email from bytes
+        msg = message_from_bytes(file_content)
+        
+        # Extract and decode subject
         subject = msg.get('Subject', '(No Subject)')
+        decoded_subject = []
+        for part, encoding in decode_header(subject):
+            if isinstance(part, bytes):
+                decoded_subject.append(try_decode_with_encodings(part, [encoding] if encoding else None))
+            else:
+                decoded_subject.append(part)
+        subject = ''.join(decoded_subject)
         
-        # Get body content (simplified approach)
+        # Extract date
+        date_str = msg.get('Date', '')
+        if date_str:
+            try:
+                date_tuple = email.utils.parsedate_tz(date_str)
+                formatted_date = email.utils.formatdate(email.utils.mktime_tz(date_tuple), localtime=True)
+            except:
+                formatted_date = date_str
+        else:
+            formatted_date = ''
+        
+        # Decode From field
+        from_field = msg.get('From', '')
+        decoded_from = []
+        for part, encoding in decode_header(from_field):
+            if isinstance(part, bytes):
+                decoded_from.append(try_decode_with_encodings(part, [encoding] if encoding else None))
+            else:
+                decoded_from.append(part)
+        from_field = ''.join(decoded_from)
+        
+        # Decode To field
+        to_field = msg.get('To', '')
+        decoded_to = []
+        for part, encoding in decode_header(to_field):
+            if isinstance(part, bytes):
+                decoded_to.append(try_decode_with_encodings(part, [encoding] if encoding else None))
+            else:
+                decoded_to.append(part)
+        to_field = ''.join(decoded_to)
+        
+        # Get body content and attachments
         body = ''
+        html_body = ''
+        attachments = []
+        
         if msg.is_multipart():
             for part in msg.walk():
                 content_type = part.get_content_type()
-                if content_type == 'text/plain' or content_type == 'text/html':
-                    body = part.get_payload(decode=True).decode('utf-8', errors='replace')
-                    break
+                disposition = part.get_content_disposition()
+                
+                # Check if this part is an attachment
+                if disposition and disposition.lower() == 'attachment':
+                    filename = part.get_filename()
+                    if filename:
+                        # Decode filename if needed
+                        decoded_filename = []
+                        for fname_part, fname_encoding in decode_header(filename):
+                            if isinstance(fname_part, bytes):
+                                decoded_filename.append(try_decode_with_encodings(
+                                    fname_part, [fname_encoding] if fname_encoding else None))
+                            else:
+                                decoded_filename.append(fname_part)
+                        decoded_filename = ''.join(decoded_filename)
+                        
+                        # Add attachment info to list
+                        attachments.append({
+                            'name': decoded_filename,
+                            'size': f"{len(part.get_payload(decode=True) or b'') / 1024:.1f} KB",
+                            'type': content_type
+                        })
+                elif content_type == 'text/plain':
+                    # Plain text body
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        charset = part.get_content_charset() or 'utf-8'
+                        body = try_decode_with_encodings(payload, [charset, 'utf-8', 'iso-8859-1', 'windows-1252'])
+                elif content_type == 'text/html':
+                    # HTML body - preferred for display
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        charset = part.get_content_charset() or 'utf-8'
+                        html_body = try_decode_with_encodings(payload, [charset, 'utf-8', 'iso-8859-1', 'windows-1252'])
         else:
-            body = msg.get_payload(decode=True).decode('utf-8', errors='replace')
+            # Not multipart, just get the payload
+            payload = msg.get_payload(decode=True)
+            if payload:
+                charset = msg.get_content_charset() or 'utf-8'
+                body = try_decode_with_encodings(payload, [charset, 'utf-8', 'iso-8859-1', 'windows-1252'])
+        
+        # If we have HTML body, prefer that over plain text
+        display_body = html_body or body
         
         return jsonify({
             'templateId': template_id,
+            'fileName': f"{template_id}.eml",
             'subject': subject,
-            'body': body,
-            'rawContent': email_content
+            'date': formatted_date,
+            'from': from_field,
+            'to': to_field,
+            'body': display_body,
+            'plainBody': body if html_body else '',
+            'attachments': attachments,
+            'isHtml': bool(html_body),
+            'rawContent': try_decode_with_encodings(file_content)
         })
+        
     except Exception as e:
-        return jsonify({'error': f'Error reading email template: {str(e)}'}), 500
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error parsing email template: {str(e)}")
+        print(error_details)
+        return jsonify({
+            'error': f'Error parsing email template: {str(e)}',
+            'details': error_details
+        }), 500
 
 @app.route('/api/forms/preview-csv', methods=['POST'])
 def preview_csv():
@@ -695,6 +808,174 @@ def check_form_files():
         'email_files': email_files if os.path.exists(email_dir) else [],
         'form_files': form_files
     })
+
+# Add this new route to server.py
+
+@app.route('/api/forms/preview-processed-email', methods=['GET'])
+def preview_processed_email():
+    file_name = request.args.get('file')
+    batch_id = request.args.get('batchId')
+    
+    if not file_name or not batch_id:
+        return jsonify({'error': 'Missing required parameters'}), 400
+    
+    # Find the email file in output directories
+    potential_paths = [
+        os.path.join('output', 'email', batch_id, file_name),
+        os.path.join('output', batch_id, file_name),
+        os.path.join('output', file_name)
+    ]
+    
+    # Find first existing file path
+    file_path = None
+    for path in potential_paths:
+        if os.path.exists(path):
+            file_path = path
+            break
+    
+    if not file_path:
+        return jsonify({'error': 'Email file not found'}), 404
+    
+    # Parse the email file to extract subject and body
+    try:
+        from email import message_from_bytes
+        import email.utils
+        from email.header import decode_header
+        
+        # Helper function to try multiple encodings
+        def try_decode_with_encodings(content, encodings=['utf-8', 'iso-8859-1', 'windows-1252']):
+            if not content:
+                return ""
+            
+            for encoding in encodings:
+                try:
+                    return content.decode(encoding)
+                except UnicodeDecodeError:
+                    continue
+            # Fallback with replacements
+            return content.decode('utf-8', errors='replace')
+        
+        # Read file as binary
+        with open(file_path, 'rb') as f:
+            file_content = f.read()
+        
+        # Parse email from bytes
+        msg = message_from_bytes(file_content)
+        
+        # Extract and decode subject
+        subject = msg.get('Subject', '(No Subject)')
+        decoded_subject = []
+        for part, encoding in decode_header(subject):
+            if isinstance(part, bytes):
+                decoded_subject.append(try_decode_with_encodings(part, [encoding] if encoding else None))
+            else:
+                decoded_subject.append(part)
+        subject = ''.join(decoded_subject)
+        
+        # Extract date
+        date_str = msg.get('Date', '')
+        if date_str:
+            try:
+                date_tuple = email.utils.parsedate_tz(date_str)
+                formatted_date = email.utils.formatdate(email.utils.mktime_tz(date_tuple), localtime=True)
+            except:
+                formatted_date = date_str
+        else:
+            formatted_date = ''
+        
+        # Decode From field
+        from_field = msg.get('From', '')
+        decoded_from = []
+        for part, encoding in decode_header(from_field):
+            if isinstance(part, bytes):
+                decoded_from.append(try_decode_with_encodings(part, [encoding] if encoding else None))
+            else:
+                decoded_from.append(part)
+        from_field = ''.join(decoded_from)
+        
+        # Decode To field
+        to_field = msg.get('To', '')
+        decoded_to = []
+        for part, encoding in decode_header(to_field):
+            if isinstance(part, bytes):
+                decoded_to.append(try_decode_with_encodings(part, [encoding] if encoding else None))
+            else:
+                decoded_to.append(part)
+        to_field = ''.join(decoded_to)
+        
+        # Get body content and attachments
+        body = ''
+        html_body = ''
+        attachments = []
+        
+        if msg.is_multipart():
+            for part in msg.walk():
+                content_type = part.get_content_type()
+                disposition = part.get_content_disposition()
+                
+                # Check if this part is an attachment
+                if disposition and disposition.lower() == 'attachment':
+                    filename = part.get_filename()
+                    if filename:
+                        # Decode filename if needed
+                        decoded_filename = []
+                        for fname_part, fname_encoding in decode_header(filename):
+                            if isinstance(fname_part, bytes):
+                                decoded_filename.append(try_decode_with_encodings(
+                                    fname_part, [fname_encoding] if fname_encoding else None))
+                            else:
+                                decoded_filename.append(fname_part)
+                        decoded_filename = ''.join(decoded_filename)
+                        
+                        # Add attachment info to list
+                        attachments.append({
+                            'name': decoded_filename,
+                            'size': f"{len(part.get_payload(decode=True) or b'') / 1024:.1f} KB",
+                            'type': content_type
+                        })
+                elif content_type == 'text/plain':
+                    # Plain text body
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        charset = part.get_content_charset() or 'utf-8'
+                        body = try_decode_with_encodings(payload, [charset, 'utf-8', 'iso-8859-1', 'windows-1252'])
+                elif content_type == 'text/html':
+                    # HTML body - preferred for display
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        charset = part.get_content_charset() or 'utf-8'
+                        html_body = try_decode_with_encodings(payload, [charset, 'utf-8', 'iso-8859-1', 'windows-1252'])
+        else:
+            # Not multipart, just get the payload
+            payload = msg.get_payload(decode=True)
+            if payload:
+                charset = msg.get_content_charset() or 'utf-8'
+                body = try_decode_with_encodings(payload, [charset, 'utf-8', 'iso-8859-1', 'windows-1252'])
+        
+        # If we have HTML body, prefer that over plain text
+        display_body = html_body or body
+        
+        return jsonify({
+            'fileName': file_name,
+            'subject': subject,
+            'date': formatted_date,
+            'from': from_field,
+            'to': to_field,
+            'body': display_body,
+            'plainBody': body if html_body else '',
+            'attachments': attachments,
+            'isHtml': bool(html_body)
+        })
+        
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error parsing email file: {str(e)}")
+        print(error_details)
+        return jsonify({
+            'error': f'Error parsing email: {str(e)}',
+            'details': error_details
+        }), 500
 
 if __name__ == '__main__':
     # Create necessary directories at startup
