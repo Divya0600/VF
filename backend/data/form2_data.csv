@@ -1,2 +1,2 @@
-name,vorname,strasse,hausnummer,postleitzahl,ort,geburtsdatum,name1,vorname1,strasse1,hausnummer1,postleitzahl1,ort1,geburtsdatum1,kundennummer,datum,x1,x2,x_herr_auth,x_herr_cust
-Discher,Simon,Bachstraße,7 2,10315,Berlin,11.10.1958,Fischer,Lukas,Bachstraße,,10315,Berlin,07.08.1999,234936402,20.03.2025,x,x,x,x
+ID,name,vorname,strasse,hausnummer,postleitzahl,ort,geburtsdatum,name1,vorname1,strasse1,hausnummer1,postleitzahl1,ort1,geburtsdatum1,kundennummer,datum,x1,x2,x_herr_auth,x_herr_cust
+1234,Discher,Simon,Bachstraße,7 2,10315,Berlin,11.10.1958,Fischer,Lukas,Bachstraße,,10315,Berlin,07.08.1999,234936402,20.03.2025,x,x,x,x

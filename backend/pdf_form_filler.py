@@ -484,24 +484,41 @@ def fill_pdf_form(form_type, form_data, output_file=None):
         input_basename = os.path.basename(empty_form)
         input_name, input_ext = os.path.splitext(input_basename)
         
-        # Use custom output file if provided, otherwise use config and add 'processed_' prefix
+        # Generate filename based on input filename and record ID
         if output_file:
-            # Check if we need to add 'processed_' prefix to the output filename
-            output_dir = os.path.dirname(output_file)
-            output_basename = os.path.basename(output_file)
-            if not output_basename.startswith('processed_'):
-                output_basename = f"processed_{output_basename}"
-            output_path = os.path.join(output_dir, output_basename)
-        else:
-            # Use config path but add 'processed_' prefix
-            default_output_path = config.get("output_file", os.path.join(OUTPUT_DIR, f"filled_{input_name}{input_ext}"))
-            output_dir = os.path.dirname(default_output_path)
-            output_basename = os.path.basename(default_output_path)
-            if not output_basename.startswith('processed_'):
-                output_basename = f"processed_{output_basename}"
-            output_path = os.path.join(output_dir, output_basename)
+            # If a specific output path is provided, use it directly
+            output_path = output_file
+        else:  
+            # Get the base filename from the input file
+            input_basename = os.path.basename(empty_form)
+            input_name, input_ext = os.path.splitext(input_basename)
             
-        # Rest of the function implementation continues here...
+            # Get the ID from form_data if available
+            record_id = form_data.get('ID', '')
+            
+            # Create output filename: inputfilename_ID.ext
+            if record_id:
+                output_filename = f"{input_name}_{record_id}{input_ext}"
+            else:
+                # Fallback if no ID is present
+                timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                output_filename = f"{input_name}_{timestamp}{input_ext}"
+            
+            # Determine output directory from config or default
+            config_output_path = config.get("output_file", "")
+            if config_output_path:
+                output_dir = os.path.dirname(config_output_path)
+                if not output_dir:  # Handle case where output_file is just a filename
+                    output_dir = OUTPUT_DIR
+            else:
+                output_dir = OUTPUT_DIR
+            
+            # Create full output path
+            output_path = os.path.join(output_dir, output_filename)
+            
+            # Log the filename generation
+            logger.info(f"Generated output filename: {output_filename}")
+            logger.info(f"Full output path: {output_path}")
         
         # Check if empty form exists
         if not check_path_exists(empty_form, f"Empty form file not found: {empty_form}"):
@@ -566,6 +583,7 @@ def fill_pdf_form(form_type, form_data, output_file=None):
     except Exception as e:
         logger.exception(f"Error filling PDF form: {e}")
         return False
+
 def read_csv_input(csv_file):
     """Read form data from a CSV file"""
     if not check_path_exists(csv_file, f"CSV file not found: {csv_file}"):
@@ -599,17 +617,33 @@ def process_batch(form_type, csv_file, output_dir=None):
     if output_dir:
         ensure_dir_exists(output_dir)
     
+    # Get form configuration for input filename
+    config = load_form_config(form_type)
+    if not config:
+        logger.error(f"Could not load config for form type: {form_type}")
+        return False
+
+    # Get base input filename
+    empty_form = config.get("empty_form_file", os.path.join(FORMS_DIR, "empty_form.pdf"))
+    input_basename = os.path.basename(empty_form)
+    input_name, input_ext = os.path.splitext(input_basename)
+    
     # Process each row
     success_count = 0
     for i, form_data in enumerate(form_data_list):
-        # Generate output filename
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        # Get record ID or use row number as fallback
+        record_id = form_data.get('ID', f"row{i+1}")
+        
+        # Generate output filename with template name and ID  
+        output_filename = f"{input_name}_{record_id}{input_ext}"
+        
         if output_dir:
-            output_file = os.path.join(output_dir, f"filled_form.pdf")
+            output_file = os.path.join(output_dir, output_filename)
         else:
-            output_file = os.path.join(OUTPUT_DIR, f"filled_form_{i+1}_{timestamp}.pdf")
+            output_file = os.path.join(OUTPUT_DIR, output_filename)
         
         logger.info(f"\nProcessing form {i+1} of {len(form_data_list)}")
+        logger.info(f"Output file: {output_file}")
         logger.info(f"Data: {form_data}")
         
         # Fill the form
@@ -618,6 +652,7 @@ def process_batch(form_type, csv_file, output_dir=None):
     
     logger.info(f"\nBatch processing completed. {success_count} of {len(form_data_list)} forms processed successfully.")
     return success_count > 0
+
 
 def main():
     """Main function - Non-interactive, requires command line parameters"""

@@ -19,6 +19,8 @@ const FormFillerApp = () => {
   const [formTypeDropdownOpen, setFormTypeDropdownOpen] = useState(false);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showFilledPreview, setShowFilledPreview] = useState(false);
+  const [previewFilledForm, setPreviewFilledForm] = useState(null);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [validationError, setValidationError] = useState(null);
@@ -342,13 +344,12 @@ const FormFillerApp = () => {
   
   const renderPreviewModal = () => (
     <PdfPreviewComponent
-      showModal={showPreviewModal}
-      template={selectedTemplate}
-      onClose={() => setShowPreviewModal(false)}
-      onUseTemplate={(template) => {
-        setSelectedTemplate(template);
-        setStep(2);
-      }}
+      showModal={showFilledPreview}
+      template={null}
+      isFilledForm={true}
+      filledFormInfo={previewFilledForm}
+      onClose={() => setShowFilledPreview(false)}
+      onUseTemplate={null}
     />
   );
 
@@ -979,6 +980,22 @@ const FormFillerApp = () => {
                       <div className="flex space-x-8 items-center">
                         <div className="text-sm text-gray-600 w-20 text-center">{file.size}</div>
                         <div className="w-20">
+
+                        <button 
+                          className="p-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-gray-100 transition-colors"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            // Set the filled form for preview
+                            setPreviewFilledForm({
+                              name: file.name,
+                              batchId: processingResults.batchId
+                            });
+                            setShowFilledPreview(true);
+                          }}
+                        >
+                          <Eye size={18} />
+                        </button>
                         <button 
                           className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors"
                           onClick={(e) => {
@@ -1039,22 +1056,65 @@ const FormFillerApp = () => {
     </div>
   );
 
-  // Download a single form
-// Download functionality for FormFillerApp.jsx
 
-// Download a single processed form
-  // Download a single form - using batchId for better file location
-  // Replace the existing downloadForm function with this improved version
-  // Replace both download functions in FormFillerApp.jsx
-
-// Download a single form
-  // Download a single form
   const downloadForm = (fileName, batchId) => {
-    // Direct browser download - simplest approach
-    window.location.href = `/api/forms/download?file=${encodeURIComponent(fileName)}&batchId=${batchId}`;
-  }
-  
-  // Download all forms as zip
+    try {
+      console.log(`Attempting to download: ${fileName} from batch ${batchId}`);
+      
+      // Create and display a loading message
+      const statusId = `download-status-${Date.now()}`;
+      const statusDiv = document.createElement('div');
+      statusDiv.id = statusId;
+      statusDiv.className = 'fixed bottom-4 right-4 bg-blue-100 text-blue-800 p-4 rounded-lg shadow-md z-50';
+      statusDiv.innerHTML = `<div class="flex items-center"><div class="animate-spin mr-2">⟳</div> Downloading ${fileName}...</div>`;
+      document.body.appendChild(statusDiv);
+      
+      // Use fetch to handle potential errors better
+      fetch(`/api/forms/download?file=${encodeURIComponent(fileName)}&batchId=${batchId}&t=${Date.now()}`)
+        .then(response => {
+          if (!response.ok) {
+            if (response.headers.get('content-type')?.includes('application/json')) {
+              return response.json().then(data => {
+                throw new Error(data.error || `Server error: ${response.status}`);
+              });
+            }
+            throw new Error(`Server error: ${response.status}`);
+          }
+          return response.blob();
+        })
+        .then(blob => {
+          // Create download link for the blob
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = fileName;
+          document.body.appendChild(link);
+          link.click();
+          
+          setTimeout(() => {
+            URL.revokeObjectURL(link.href);
+            document.body.removeChild(link);
+            
+            // Update status to success
+            statusDiv.className = 'fixed bottom-4 right-4 bg-green-100 text-green-800 p-4 rounded-lg shadow-md z-50';
+            statusDiv.innerHTML = `<div class="flex items-center">✓ Downloaded ${fileName}</div>`;
+            setTimeout(() => document.body.removeChild(statusDiv), 3000);
+          }, 1000);
+        })
+        .catch(error => {
+          console.error('Download error:', error);
+          
+          // Update status to error
+          statusDiv.className = 'fixed bottom-4 right-4 bg-red-100 text-red-800 p-4 rounded-lg shadow-md z-50';
+          statusDiv.innerHTML = `<div class="flex items-center">❌ ${error.message || 'Error downloading file'}</div>`;
+          setTimeout(() => document.body.removeChild(statusDiv), 5000);
+        });
+    } catch (error) {
+      console.error('Error initiating download:', error);
+      alert(`Error downloading file: ${error.message}`);
+    }
+  };
+
+// Download all files function
   const downloadAllForms = (e) => {
     if (e) {
       e.preventDefault();
@@ -1068,26 +1128,59 @@ const FormFillerApp = () => {
     }
     
     try {
+      // Create and display a loading message
+      const statusId = `download-all-status-${Date.now()}`;
+      const statusDiv = document.createElement('div');
+      statusDiv.id = statusId;
+      statusDiv.className = 'fixed bottom-4 right-4 bg-blue-100 text-blue-800 p-4 rounded-lg shadow-md z-50';
+      statusDiv.innerHTML = `<div class="flex items-center"><div class="animate-spin mr-2">⟳</div> Preparing ZIP file...</div>`;
+      document.body.appendChild(statusDiv);
+      
       const batchId = processingResults.batchId;
-      const url = `/api/forms/download-all?batchId=${batchId}&t=${Date.now()}`; // Add timestamp to prevent caching
+      const url = `/api/forms/download-all?batchId=${batchId}&t=${Date.now()}`;
       
-      // Use direct link for download
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `forms_${batchId}.zip`);
-      link.setAttribute('target', '_blank');
-      
-      document.body.appendChild(link);
-      link.click();
-      
-      setTimeout(() => {
-        document.body.removeChild(link);
-      }, 1000);
-      
-      console.log('Downloading all forms:', batchId);
+      // Use fetch to handle potential errors
+      fetch(url)
+        .then(response => {
+          if (!response.ok) {
+            if (response.headers.get('content-type')?.includes('application/json')) {
+              return response.json().then(data => {
+                throw new Error(data.error || `Server error: ${response.status}`);
+              });
+            }
+            throw new Error(`Server error: ${response.status}`);
+          }
+          return response.blob();
+        })
+        .then(blob => {
+          // Create download link for the blob
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = `forms_${batchId}.zip`;
+          document.body.appendChild(link);
+          link.click();
+          
+          setTimeout(() => {
+            URL.revokeObjectURL(link.href);
+            document.body.removeChild(link);
+            
+            // Update status to success
+            statusDiv.className = 'fixed bottom-4 right-4 bg-green-100 text-green-800 p-4 rounded-lg shadow-md z-50';
+            statusDiv.innerHTML = `<div class="flex items-center">✓ Downloaded all forms</div>`;
+            setTimeout(() => document.body.removeChild(statusDiv), 3000);
+          }, 1000);
+        })
+        .catch(error => {
+          console.error('Download error:', error);
+          
+          // Update status to error
+          statusDiv.className = 'fixed bottom-4 right-4 bg-red-100 text-red-800 p-4 rounded-lg shadow-md z-50';
+          statusDiv.innerHTML = `<div class="flex items-center">❌ ${error.message || 'Error downloading files'}</div>`;
+          setTimeout(() => document.body.removeChild(statusDiv), 5000);
+        });
     } catch (error) {
-      console.error('Error downloading files:', error);
-      alert('Error downloading files. Please try again.');
+      console.error('Error initiating download:', error);
+      alert(`Error downloading files: ${error.message}`);
     }
   };
 

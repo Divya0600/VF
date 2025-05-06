@@ -196,6 +196,50 @@ def preview_csv():
     except Exception as e:
         return jsonify({'error': f'Error parsing CSV: {str(e)}'}), 400
 
+@app.route('/api/forms/preview-filled', methods=['GET'])
+def preview_filled_form():
+    file_name = request.args.get('file')
+    batch_id = request.args.get('batchId')
+    
+    if not file_name or not batch_id:
+        return jsonify({'error': 'Missing required parameters'}), 400
+    
+    # Use the same file finding logic from the download endpoint
+    potential_paths = [
+        os.path.join('output', 'pdf', batch_id, file_name),
+        os.path.join('output', batch_id, file_name),
+        os.path.join('output', file_name)
+    ]
+    
+    # Find first existing file path
+    file_path = None
+    for path in potential_paths:
+        if os.path.exists(path):
+            file_path = path
+            break
+    
+    if not file_path:
+        return jsonify({'error': 'File not found'}), 404
+    
+    # Return the PDF with correct headers for preview
+    try:
+        response = send_file(
+            file_path, 
+            mimetype='application/pdf',
+            as_attachment=False,
+            download_name=file_name
+        )
+        
+        # Add headers to prevent caching
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        return response
+    except Exception as e:
+        print(f"Error serving PDF preview: {str(e)}")
+        return jsonify({'error': f'Error serving PDF: {str(e)}'}), 500
+
+
 @app.route('/api/forms/process', methods=['POST'])
 def process_forms():
     if 'file' not in request.files:
@@ -295,10 +339,8 @@ def count_csv_rows(csv_file):
     except Exception as e:
         print(f"Error counting CSV rows: {e}")
         return 1  # Return 1 to avoid division by zero
+    
 
-
-# Modify the download_form function in server.py
-# Update the download_form function in server.py
 
 
 @app.route('/api/forms/download', methods=['GET'])
@@ -306,23 +348,121 @@ def download_form():
     file_name = request.args.get('file')
     batch_id = request.args.get('batchId')
     
-    # Check the most likely path first
-    file_path = os.path.join('output', 'pdf', batch_id, file_name)
+    if not file_name:
+        return jsonify({'error': 'No filename specified'}), 400
     
-    if not os.path.exists(file_path):
-        # Fallback to legacy path if needed
-        file_path = os.path.join('output', batch_id, file_name)
+    if not batch_id:
+        return jsonify({'error': 'No batch ID specified'}), 400
     
-    if os.path.exists(file_path):
+    print(f"Download request: file={file_name}, batchId={batch_id}")
+    
+    # Extract the base name (without extension) to help with flexible matching
+    base_name, ext = os.path.splitext(file_name)
+    
+    # Build list of possible file locations to check
+    potential_paths = [
+        # Exact filename
+        os.path.join('output', 'pdf', batch_id, file_name),
+        os.path.join('output', batch_id, file_name),
+        os.path.join('output', file_name),
+        
+        # New ID-based naming scheme (if file included processed_ prefix)
+        os.path.join('output', 'pdf', batch_id, file_name.replace('processed_', '')),
+        os.path.join('output', batch_id, file_name.replace('processed_', ''))
+    ]
+    
+    # Add additional search for template_ID naming pattern
+    if os.path.exists(os.path.join('output', 'pdf', batch_id)):
+        # Search for files matching the template name (before "_") and extension
+        template_name = base_name.split('_')[0] if '_' in base_name else base_name
+        for f in os.scandir(os.path.join('output', 'pdf', batch_id)):
+            if f.is_file() and f.name.startswith(template_name) and f.name.endswith(ext):
+                potential_paths.append(os.path.join('output', 'pdf', batch_id, f.name))
+    
+    if os.path.exists(os.path.join('output', batch_id)):
+        # Do the same for the regular output/batch_id directory
+        template_name = base_name.split('_')[0] if '_' in base_name else base_name
+        for f in os.scandir(os.path.join('output', batch_id)):
+            if f.is_file() and f.name.startswith(template_name) and f.name.endswith(ext):
+                potential_paths.append(os.path.join('output', batch_id, f.name))
+    
+    # Find first existing file path
+    file_path = None
+    for path in potential_paths:
+        print(f"Checking path: {path}")
+        if os.path.exists(path):
+            file_path = path
+            print(f"Found file at: {file_path}")
+            break
+    
+    if not file_path:
+        return jsonify({
+            'error': 'File not found',
+            'details': {
+                'requested_file': file_name,
+                'batch_id': batch_id,
+                'checked_paths': potential_paths
+            }
+        }), 404
+    
+    try:
         # Force file download with explicit headers
-        return send_file(
+        response = send_file(
             file_path,
             as_attachment=True,
-            download_name=file_name,
-            mimetype='application/octet-stream'
+            download_name=os.path.basename(file_path),  # Use actual filename
+            mimetype='application/pdf'
         )
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        return response
+        
+    except Exception as e:
+        print(f"Error sending file: {str(e)}")
+        return jsonify({'error': f'Error sending file: {str(e)}'}), 500
+
+@app.route('/api/forms/debug-files', methods=['GET'])
+def debug_files():
+    """Debug endpoint to check processed files and their locations"""
+    batch_id = request.args.get('batchId')
     
-    return jsonify({'error': 'File not found'}), 404
+    output = {
+        'cwd': os.getcwd(),
+        'output_dir_exists': os.path.exists('output'),
+        'directories': {}
+    }
+    
+    # List main output directory
+    if os.path.exists('output'):
+        output['output_files'] = os.listdir('output')
+        
+        # Check subdirectories
+        for subdir in ['pdf', 'email']:
+            subdir_path = os.path.join('output', subdir)
+            if os.path.exists(subdir_path):
+                output['directories'][subdir] = {
+                    'exists': True,
+                    'contents': os.listdir(subdir_path)
+                }
+                
+                # If batch_id provided, check that specific batch
+                if batch_id and os.path.exists(os.path.join(subdir_path, batch_id)):
+                    batch_dir = os.path.join(subdir_path, batch_id)
+                    output['directories'][subdir]['batch'] = {
+                        'id': batch_id,
+                        'exists': True,
+                        'files': [
+                            {
+                                'name': f,
+                                'size': os.path.getsize(os.path.join(batch_dir, f)),
+                                'modified': os.path.getmtime(os.path.join(batch_dir, f))
+                            }
+                            for f in os.listdir(batch_dir) if os.path.isfile(os.path.join(batch_dir, f))
+                        ]
+                    }
+    
+    return jsonify(output)
 
 
 @app.route('/api/forms/download-all', methods=['GET'])
@@ -333,9 +473,9 @@ def download_all_forms():
     
     # Check multiple possible directory paths
     batch_paths = [
-        os.path.join('output', batch_id),
         os.path.join('output', 'pdf', batch_id),
-        os.path.join('output', 'email', batch_id)
+        os.path.join('output', batch_id),
+        os.path.join('output')
     ]
     
     # Find which path exists
@@ -349,7 +489,7 @@ def download_all_forms():
     
     if not batch_dir:
         print(f"Batch directory not found. Checked paths: {batch_paths}")
-        return jsonify({'error': f'Batch not found'}), 404
+        return jsonify({'error': f'Batch not found: {batch_id}'}), 404
     
     # Create a ZIP file in memory
     memory_file = io.BytesIO()
@@ -358,13 +498,19 @@ def download_all_forms():
             file_count = 0
             for file_name in os.listdir(batch_dir):
                 file_path = os.path.join(batch_dir, file_name)
-                if os.path.isfile(file_path):
+                
+                # Only include PDF files that are likely part of this batch
+                if os.path.isfile(file_path) and file_name.endswith('.pdf'):
+                    # If we're in the output root, only include files with batch_id in their name
+                    if batch_dir == os.path.join('output') and batch_id not in file_name:
+                        continue
+                        
                     zf.write(file_path, file_name)
                     file_count += 1
                     print(f"Added to zip: {file_name}")
             
             if file_count == 0:
-                return jsonify({'error': 'No files found in batch directory'}), 404
+                return jsonify({'error': 'No PDF files found in batch directory'}), 404
         
         memory_file.seek(0)
         
@@ -381,7 +527,6 @@ def download_all_forms():
     except Exception as e:
         print(f"Error creating ZIP file: {str(e)}")
         return jsonify({'error': f'Error creating ZIP file: {str(e)}'}), 500
-
 
 @app.route('/api/forms/pdf-debug', methods=['GET'])
 def debug_pdf_serving():
