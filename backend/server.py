@@ -5,19 +5,48 @@ import tempfile
 import zipfile
 import io
 import csv
+import time
+from pathlib import Path
 from pdf_form_filler import load_form_config, list_available_forms, fill_pdf_form, process_batch
-
+from email_replacer import batch_process_emails
+from email_processor import process_email_with_attachments
 
 app = Flask(__name__)
+
+# Helper function to identify email templates
+def get_email_templates():
+    """Get list of available email templates"""
+    templates = []
+    email_dir = os.path.join('email', 'input')
+    if os.path.exists(email_dir):
+        templates = [os.path.splitext(f)[0] for f in os.listdir(email_dir) if f.endswith('.eml')]
+    return templates
+
+# Ensure required directories exist
+def ensure_directories():
+    """Create necessary directories if they don't exist"""
+    required_dirs = [
+        'output',
+        'output/pdf',
+        'output/email',
+        'temp',
+        'email/input',
+        'email/output',
+        'forms_config'
+    ]
+    for directory in required_dirs:
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+            print(f"Created {directory} directory")
 
 @app.route('/api/forms/types', methods=['GET'])
 def get_form_types():
     # List available form configurations
     forms = list_available_forms()
     
-    # Hardcoded list of form types you want to display
+    # Include proper categorized form types
     form_types = [
-        
+        {'id': 'all', 'name': 'All Forms'},
         {'id': 'pdf', 'name': 'PDF Forms'},
         {'id': 'email', 'name': 'Email Templates'},
         {'id': 'tif', 'name': 'TIF Images'}
@@ -25,7 +54,38 @@ def get_form_types():
     
     return jsonify({'formTypes': form_types})
 
-# Replace the existing preview_form endpoint in server.py
+@app.route('/api/forms/templates', methods=['GET'])
+def get_templates():
+    # First get all PDF forms from config files
+    forms = list_available_forms()
+    templates = []
+    
+    for form_id in forms:
+        config = load_form_config(form_id)
+        if config:
+            templates.append({
+                'id': form_id,
+                'name': config.get('name', form_id),
+                'description': config.get('description', ''),
+                'type': 'pdf',  # All these are PDF forms
+                'lastModified': '2025-03-18'
+            })
+    
+    # Now add email templates (which don't have config files)
+    email_dir = os.path.join('email', 'input')
+    if os.path.exists(email_dir):
+        for filename in os.listdir(email_dir):
+            if filename.endswith('.eml'):
+                template_id = os.path.splitext(filename)[0]
+                templates.append({
+                    'id': template_id,
+                    'name': template_id.replace('_', ' ').title(),  # Create a name from the filename
+                    'description': 'Email template',
+                    'type': 'email',
+                    'lastModified': '2025-03-18'
+                })
+    
+    return jsonify({'templates': templates})
 
 @app.route('/api/forms/preview', methods=['GET'])
 def preview_form():
@@ -94,82 +154,6 @@ def preview_form():
             'file_exists': os.path.exists(pdf_path),
             'file_size': os.path.getsize(pdf_path) if os.path.exists(pdf_path) else 0
         }), 500
-
-
-# Add this function to help you debug the PDF file locations
-@app.route('/api/forms/file-check', methods=['GET'])
-def check_form_files():
-    """Debug endpoint to check all form files and their existence"""
-    form_files = {}
-    forms = list_available_forms()
-    
-    # First check configuration directory
-    config_dir = os.path.join(os.getcwd(), 'forms')
-    if os.path.exists(config_dir):
-        config_files = [f for f in os.listdir(config_dir) if f.endswith('.json')]
-    else:
-        config_files = []
-    
-    for form_id in forms:
-        config = load_form_config(form_id)
-        if not config:
-            form_files[form_id] = {
-                'config_found': False,
-                'pdf_path': None,
-                'pdf_exists': False
-            }
-            continue
-            
-        pdf_path = config.get('empty_form_file', None)
-        pdf_exists = pdf_path and os.path.exists(pdf_path)
-        
-        form_files[form_id] = {
-            'config_found': True,
-            'pdf_path': pdf_path,
-            'pdf_exists': pdf_exists,
-            'pdf_size': os.path.getsize(pdf_path) if pdf_exists else 0
-        }
-    
-    return jsonify({
-        'working_directory': os.getcwd(),
-        'config_directory': config_dir,
-        'config_directory_exists': os.path.exists(config_dir),
-        'config_files': config_files if os.path.exists(config_dir) else [],
-        'form_files': form_files
-    })
-    
-@app.route('/api/forms/templates', methods=['GET'])
-def get_templates():
-    # First get all PDF forms from config files
-    forms = list_available_forms()
-    templates = []
-    
-    for form_id in forms:
-        config = load_form_config(form_id)
-        if config:
-            templates.append({
-                'id': form_id,
-                'name': config.get('name', form_id),
-                'description': config.get('description', ''),
-                'type': 'pdf',  # All these are PDF forms
-                'lastModified': '2025-03-18'
-            })
-    
-    # Now add email templates (which don't have config files)
-    email_dir = os.path.join('email', 'input')
-    if os.path.exists(email_dir):
-        for filename in os.listdir(email_dir):
-            if filename.endswith('.eml'):
-                template_id = os.path.splitext(filename)[0]
-                templates.append({
-                    'id': template_id,
-                    'name': template_id.replace('_', ' ').title(),  # Create a name from the filename
-                    'description': 'Email template',
-                    'type': 'email',
-                    'lastModified': '2025-03-18'
-                })
-    
-    return jsonify({'templates': templates})
 
 @app.route('/api/forms/preview-email', methods=['GET'])
 def preview_email_template():
@@ -254,16 +238,29 @@ def preview_csv():
 def preview_filled_form():
     file_name = request.args.get('file')
     batch_id = request.args.get('batchId')
+    file_type = request.args.get('type', None)  # Optional type parameter
     
     if not file_name or not batch_id:
         return jsonify({'error': 'Missing required parameters'}), 400
     
-    # Use the same file finding logic from the download endpoint
+    # Determine file type based on extension if not provided
+    if not file_type:
+        _, ext = os.path.splitext(file_name)
+        file_type = "email" if ext.lower() == ".eml" else "pdf"
+    
+    # Build potential paths based on file type
     potential_paths = [
-        os.path.join('output', 'pdf', batch_id, file_name),
+        os.path.join('output', file_type, batch_id, file_name),
         os.path.join('output', batch_id, file_name),
         os.path.join('output', file_name)
     ]
+    
+    # Add email-specific paths if needed
+    if file_type == "email":
+        potential_paths.extend([
+            os.path.join('email', 'output', batch_id, file_name),
+            os.path.join('email', 'output', file_name)
+        ])
     
     # Find first existing file path
     file_path = None
@@ -275,11 +272,17 @@ def preview_filled_form():
     if not file_path:
         return jsonify({'error': 'File not found'}), 404
     
-    # Return the PDF with correct headers for preview
+    # Return the file with correct headers for preview
     try:
+        # Determine MIME type based on extension
+        if file_path.endswith('.eml'):
+            mime_type = 'message/rfc822'
+        else:
+            mime_type = 'application/pdf'
+            
         response = send_file(
             file_path, 
-            mimetype='application/pdf',
+            mimetype=mime_type,
             as_attachment=False,
             download_name=file_name
         )
@@ -290,9 +293,8 @@ def preview_filled_form():
         response.headers['Expires'] = '0'
         return response
     except Exception as e:
-        print(f"Error serving PDF preview: {str(e)}")
-        return jsonify({'error': f'Error serving PDF: {str(e)}'}), 500
-
+        print(f"Error serving file preview: {str(e)}")
+        return jsonify({'error': f'Error serving file: {str(e)}'}), 500
 
 @app.route('/api/forms/process', methods=['POST'])
 def process_forms():
@@ -308,12 +310,18 @@ def process_forms():
     if file.filename == '':
         return jsonify({'error': 'No selected file'}), 400
     
+    # Ensure required directories exist
+    ensure_directories()
+    
     # Create a unique batch ID
-    import time
     batch_id = f"batch_{int(time.time())}"
     
-    # Create new directory structure based on file type
-    file_type = "pdf"  # Default to PDF
+    # Determine if this is an email template
+    email_templates = get_email_templates()
+    is_email = form_type in email_templates
+    
+    # Set file type and create directory structure
+    file_type = "email" if is_email else "pdf"
     output_type_dir = os.path.join('output', file_type)
     output_dir = os.path.join(output_type_dir, batch_id)
     
@@ -323,7 +331,7 @@ def process_forms():
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    # Save to a more reliable temporary location
+    # Save to a temporary location
     temp_dir = os.path.join('temp')
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
@@ -338,22 +346,52 @@ def process_forms():
         if not os.path.exists(temp_csv_path):
             return jsonify({'error': 'Failed to save uploaded file'}), 500
         
-        # Process the batch with updated output directory
-        success = process_batch(form_type, temp_csv_path, output_dir)
-        
-        # Count the number of files in the output directory
+        success = False
         files = []
-        if os.path.exists(output_dir):
-            for filename in os.listdir(output_dir):
-                if filename.endswith('.pdf'):
-                    file_path = os.path.join(output_dir, filename)
-                    file_size = os.path.getsize(file_path)
-                    files.append({
-                        'name': filename,
-                        'size': f"{file_size / 1024:.2f} KB",
-                        'date': time.strftime('%Y-%m-%d', time.gmtime(os.path.getmtime(file_path)))
-                    })
+        
+        # Process based on file type
+        if is_email:
+            # Email processing
+            try:
+                # Check if it's an Excel file for email with attachments
+                if file.filename.endswith('.xlsx'):
+                    success = process_email_with_attachments(temp_csv_path, 'email/input', output_dir)
+                else:
+                    # Regular CSV for email replacements
+                    success = batch_process_emails(temp_csv_path, 'email/input', output_dir)
                 
+                # List generated email files
+                if os.path.exists(output_dir):
+                    for filename in os.listdir(output_dir):
+                        if filename.endswith('.eml'):
+                            file_path = os.path.join(output_dir, filename)
+                            file_size = os.path.getsize(file_path)
+                            files.append({
+                                'name': filename,
+                                'size': f"{file_size / 1024:.2f} KB",
+                                'date': time.strftime('%Y-%m-%d', time.gmtime(os.path.getmtime(file_path)))
+                            })
+            except Exception as e:
+                print(f"Error in email processing: {e}")
+                import traceback
+                traceback.print_exc()
+                return jsonify({'error': f'Error processing emails: {str(e)}'}), 500
+        else:
+            # PDF form processing (use existing code)
+            success = process_batch(form_type, temp_csv_path, output_dir)
+            
+            # Count the number of files in the output directory
+            if os.path.exists(output_dir):
+                for filename in os.listdir(output_dir):
+                    if filename.endswith('.pdf'):
+                        file_path = os.path.join(output_dir, filename)
+                        file_size = os.path.getsize(file_path)
+                        files.append({
+                            'name': filename,
+                            'size': f"{file_size / 1024:.2f} KB",
+                            'date': time.strftime('%Y-%m-%d', time.gmtime(os.path.getmtime(file_path)))
+                        })
+        
         success_count = len(files)
         
         # Clean up temporary CSV file
@@ -363,6 +401,7 @@ def process_forms():
         return jsonify({
             'success': success,
             'batchId': batch_id,
+            'fileType': file_type,
             'successCount': success_count,
             'successRate': "100%" if success_count > 0 else "0%",
             'files': files
@@ -382,25 +421,11 @@ def process_forms():
                 
         return jsonify({'error': f'Error processing forms: {str(e)}'}), 500
 
-def count_csv_rows(csv_file):
-    """Count the number of rows in a CSV file"""
-    try:
-        with open(csv_file, 'r', encoding='utf-8') as f:
-            reader = csv.reader(f)
-            next(reader, None)  # Skip header if it exists
-            count = sum(1 for _ in reader)
-        return max(1, count)  # Ensure we never divide by zero
-    except Exception as e:
-        print(f"Error counting CSV rows: {e}")
-        return 1  # Return 1 to avoid division by zero
-    
-
-
-
 @app.route('/api/forms/download', methods=['GET'])
 def download_form():
     file_name = request.args.get('file')
     batch_id = request.args.get('batchId')
+    file_type = request.args.get('type', None)  # Optional type parameter
     
     if not file_name:
         return jsonify({'error': 'No filename specified'}), 400
@@ -408,37 +433,28 @@ def download_form():
     if not batch_id:
         return jsonify({'error': 'No batch ID specified'}), 400
     
-    print(f"Download request: file={file_name}, batchId={batch_id}")
+    print(f"Download request: file={file_name}, batchId={batch_id}, type={file_type}")
     
-    # Extract the base name (without extension) to help with flexible matching
-    base_name, ext = os.path.splitext(file_name)
+    # Determine file type based on extension if not provided
+    if not file_type:
+        _, ext = os.path.splitext(file_name)
+        file_type = "email" if ext.lower() == ".eml" else "pdf"
     
     # Build list of possible file locations to check
     potential_paths = [
-        # Exact filename
-        os.path.join('output', 'pdf', batch_id, file_name),
+        # Primary paths based on file type
+        os.path.join('output', file_type, batch_id, file_name),
+        # Legacy paths
         os.path.join('output', batch_id, file_name),
-        os.path.join('output', file_name),
-        
-        # New ID-based naming scheme (if file included processed_ prefix)
-        os.path.join('output', 'pdf', batch_id, file_name.replace('processed_', '')),
-        os.path.join('output', batch_id, file_name.replace('processed_', ''))
+        os.path.join('output', file_name)
     ]
     
-    # Add additional search for template_ID naming pattern
-    if os.path.exists(os.path.join('output', 'pdf', batch_id)):
-        # Search for files matching the template name (before "_") and extension
-        template_name = base_name.split('_')[0] if '_' in base_name else base_name
-        for f in os.scandir(os.path.join('output', 'pdf', batch_id)):
-            if f.is_file() and f.name.startswith(template_name) and f.name.endswith(ext):
-                potential_paths.append(os.path.join('output', 'pdf', batch_id, f.name))
-    
-    if os.path.exists(os.path.join('output', batch_id)):
-        # Do the same for the regular output/batch_id directory
-        template_name = base_name.split('_')[0] if '_' in base_name else base_name
-        for f in os.scandir(os.path.join('output', batch_id)):
-            if f.is_file() and f.name.startswith(template_name) and f.name.endswith(ext):
-                potential_paths.append(os.path.join('output', batch_id, f.name))
+    # Add email-specific paths if needed
+    if file_type == "email":
+        potential_paths.extend([
+            os.path.join('email', 'output', batch_id, file_name),
+            os.path.join('email', 'output', file_name)
+        ])
     
     # Find first existing file path
     file_path = None
@@ -455,17 +471,24 @@ def download_form():
             'details': {
                 'requested_file': file_name,
                 'batch_id': batch_id,
+                'file_type': file_type,
                 'checked_paths': potential_paths
             }
         }), 404
     
     try:
+        # Determine MIME type based on extension
+        if file_path.endswith('.eml'):
+            mime_type = 'message/rfc822'
+        else:
+            mime_type = 'application/pdf'
+            
         # Force file download with explicit headers
         response = send_file(
             file_path,
             as_attachment=True,
             download_name=os.path.basename(file_path),  # Use actual filename
-            mimetype='application/pdf'
+            mimetype=mime_type
         )
         response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         response.headers['Pragma'] = 'no-cache'
@@ -475,6 +498,97 @@ def download_form():
     except Exception as e:
         print(f"Error sending file: {str(e)}")
         return jsonify({'error': f'Error sending file: {str(e)}'}), 500
+
+@app.route('/api/forms/download-all', methods=['GET'])
+def download_all_forms():
+    batch_id = request.args.get('batchId')
+    file_type = request.args.get('type', None)  # Optional type parameter
+    
+    if not batch_id:
+        return jsonify({'error': 'Batch ID not specified'}), 400
+    
+    # Check multiple possible directory paths
+    batch_paths = []
+    
+    if file_type == "email":
+        # Email-specific paths
+        batch_paths = [
+            os.path.join('output', 'email', batch_id),
+            os.path.join('email', 'output', batch_id)
+        ]
+    elif file_type == "pdf":
+        # PDF-specific paths
+        batch_paths = [
+            os.path.join('output', 'pdf', batch_id)
+        ]
+    else:
+        # Check all possible paths if type not specified
+        batch_paths = [
+            os.path.join('output', 'pdf', batch_id),
+            os.path.join('output', 'email', batch_id),
+            os.path.join('output', batch_id),
+            os.path.join('email', 'output', batch_id)
+        ]
+    
+    # Find which path exists
+    batch_dir = None
+    for path in batch_paths:
+        print(f"Checking batch path: {path}")
+        if os.path.exists(path):
+            batch_dir = path
+            print(f"Found batch directory: {batch_dir}")
+            break
+    
+    if not batch_dir:
+        print(f"Batch directory not found. Checked paths: {batch_paths}")
+        return jsonify({'error': f'Batch not found: {batch_id}'}), 404
+    
+    # Create a ZIP file in memory
+    memory_file = io.BytesIO()
+    try:
+        with zipfile.ZipFile(memory_file, 'w') as zf:
+            file_count = 0
+            
+            # Determine appropriate extensions based on directory
+            if 'email' in batch_dir:
+                extensions = ['.eml']
+                zip_prefix = 'email'
+            else:
+                extensions = ['.pdf']
+                zip_prefix = 'pdf'
+            
+            for file_name in os.listdir(batch_dir):
+                file_path = os.path.join(batch_dir, file_name)
+                
+                # Only include files with the correct extension
+                if os.path.isfile(file_path) and any(file_name.endswith(ext) for ext in extensions):
+                    # If we're in the output root, only include files with batch_id in their name
+                    if (batch_dir == os.path.join('output') or 
+                        batch_dir == os.path.join('email', 'output')) and batch_id not in file_name:
+                        continue
+                        
+                    zf.write(file_path, file_name)
+                    file_count += 1
+                    print(f"Added to zip: {file_name}")
+            
+            if file_count == 0:
+                return jsonify({'error': f'No {zip_prefix.upper()} files found in batch directory'}), 404
+        
+        memory_file.seek(0)
+        
+        # Create response with the zip file
+        response = make_response(memory_file.getvalue())
+        response.headers['Content-Type'] = 'application/zip'
+        response.headers['Content-Disposition'] = f'attachment; filename="{zip_prefix}_{batch_id}.zip"'
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        
+        print(f"Sending zip with {file_count} files from {batch_dir}")
+        return response
+    except Exception as e:
+        print(f"Error creating ZIP file: {str(e)}")
+        return jsonify({'error': f'Error creating ZIP file: {str(e)}'}), 500
 
 @app.route('/api/forms/debug-files', methods=['GET'])
 def debug_files():
@@ -518,127 +632,71 @@ def debug_files():
     
     return jsonify(output)
 
-
-@app.route('/api/forms/download-all', methods=['GET'])
-def download_all_forms():
-    batch_id = request.args.get('batchId')
-    if not batch_id:
-        return jsonify({'error': 'Batch ID not specified'}), 400
+@app.route('/api/forms/file-check', methods=['GET'])
+def check_form_files():
+    """Debug endpoint to check all form files and their existence"""
+    form_files = {}
+    forms = list_available_forms()
     
-    # Check multiple possible directory paths
-    batch_paths = [
-        os.path.join('output', 'pdf', batch_id),
-        os.path.join('output', batch_id),
-        os.path.join('output')
-    ]
+    # First check PDF configuration directory
+    config_dir = os.path.join(os.getcwd(), 'forms_config')
+    if os.path.exists(config_dir):
+        config_files = [f for f in os.listdir(config_dir) if f.endswith('.json')]
+    else:
+        config_files = []
     
-    # Find which path exists
-    batch_dir = None
-    for path in batch_paths:
-        print(f"Checking batch path: {path}")
-        if os.path.exists(path):
-            batch_dir = path
-            print(f"Found batch directory: {batch_dir}")
-            break
+    # Check email templates directory
+    email_dir = os.path.join(os.getcwd(), 'email', 'input')
+    if os.path.exists(email_dir):
+        email_files = [f for f in os.listdir(email_dir) if f.endswith('.eml')]
+    else:
+        email_files = []
     
-    if not batch_dir:
-        print(f"Batch directory not found. Checked paths: {batch_paths}")
-        return jsonify({'error': f'Batch not found: {batch_id}'}), 404
-    
-    # Create a ZIP file in memory
-    memory_file = io.BytesIO()
-    try:
-        with zipfile.ZipFile(memory_file, 'w') as zf:
-            file_count = 0
-            for file_name in os.listdir(batch_dir):
-                file_path = os.path.join(batch_dir, file_name)
-                
-                # Only include PDF files that are likely part of this batch
-                if os.path.isfile(file_path) and file_name.endswith('.pdf'):
-                    # If we're in the output root, only include files with batch_id in their name
-                    if batch_dir == os.path.join('output') and batch_id not in file_name:
-                        continue
-                        
-                    zf.write(file_path, file_name)
-                    file_count += 1
-                    print(f"Added to zip: {file_name}")
+    for form_id in forms:
+        config = load_form_config(form_id)
+        if not config:
+            form_files[form_id] = {
+                'config_found': False,
+                'pdf_path': None,
+                'pdf_exists': False
+            }
+            continue
             
-            if file_count == 0:
-                return jsonify({'error': 'No PDF files found in batch directory'}), 404
+        pdf_path = config.get('empty_form_file', None)
+        pdf_exists = pdf_path and os.path.exists(pdf_path)
         
-        memory_file.seek(0)
-        
-        # Create response with the zip file
-        response = make_response(memory_file.getvalue())
-        response.headers['Content-Type'] = 'application/zip'
-        response.headers['Content-Disposition'] = f'attachment; filename="forms_{batch_id}.zip"'
-        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-        response.headers['Pragma'] = 'no-cache'
-        response.headers['Expires'] = '0'
-        
-        print(f"Sending zip with {file_count} files from {batch_dir}")
-        return response
-    except Exception as e:
-        print(f"Error creating ZIP file: {str(e)}")
-        return jsonify({'error': f'Error creating ZIP file: {str(e)}'}), 500
-
-@app.route('/api/forms/pdf-debug', methods=['GET'])
-def debug_pdf_serving():
-    """Debug endpoint to test PDF serving capabilities"""
-    form_type = request.args.get('formType')
-    
-    if not form_type:
-        return jsonify({
-            'status': 'error',
-            'message': 'Form type not specified',
-            'available_forms': list_available_forms()
-        }), 400
-    
-    # Load form configuration
-    config = load_form_config(form_type)
-    
-    if not config:
-        return jsonify({
-            'status': 'error',
-            'message': 'Form config not found',
-            'form_type': form_type,
-            'available_forms': list_available_forms()
-        }), 404
-        
-    if 'empty_form_file' not in config:
-        return jsonify({
-            'status': 'error',
-            'message': 'Form template file path not defined in config',
-            'config_keys': list(config.keys())
-        }), 404
-    
-    # Check if the file exists
-    pdf_path = config['empty_form_file']
-    file_exists = os.path.exists(pdf_path)
-    
-    if not file_exists:
-        return jsonify({
-            'status': 'error',
-            'message': 'PDF file not found at specified path',
+        form_files[form_id] = {
+            'config_found': True,
             'pdf_path': pdf_path,
-            'working_directory': os.getcwd(),
-            'file_exists': file_exists
-        }), 404
+            'pdf_exists': pdf_exists,
+            'pdf_size': os.path.getsize(pdf_path) if pdf_exists else 0
+        }
     
-    # Return file info instead of the actual file
-    file_size = os.path.getsize(pdf_path)
+    # Add email template info
+    for email_file in email_files:
+        template_id = os.path.splitext(email_file)[0]
+        email_path = os.path.join(email_dir, email_file)
+        
+        form_files[template_id] = {
+            'config_found': False,  # Emails don't use config
+            'email_path': email_path,
+            'email_exists': os.path.exists(email_path),
+            'email_size': os.path.getsize(email_path) if os.path.exists(email_path) else 0,
+            'type': 'email'
+        }
     
     return jsonify({
-        'status': 'success',
-        'message': 'PDF file found and accessible',
-        'pdf_path': pdf_path,
-        'file_size': f"{file_size / 1024:.2f} KB",
-        'mime_type': 'application/pdf',
-        'preview_url': f"/api/forms/preview?formType={form_type}"
+        'working_directory': os.getcwd(),
+        'config_directory': config_dir,
+        'config_directory_exists': os.path.exists(config_dir),
+        'config_files': config_files if os.path.exists(config_dir) else [],
+        'email_directory': email_dir,
+        'email_directory_exists': os.path.exists(email_dir),
+        'email_files': email_files if os.path.exists(email_dir) else [],
+        'form_files': form_files
     })
+
 if __name__ == '__main__':
-    # Ensure output directory exists
-    if not os.path.exists('output'):
-        os.makedirs('output')
-    
+    # Create necessary directories at startup
+    ensure_directories()
     app.run(debug=True, port=5000)

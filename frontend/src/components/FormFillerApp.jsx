@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import PdfPreviewComponent from './PdfPreviewComponent';
 import EmailPreviewComponent from './EmailPreviewComponent';
+import { Mail} from 'lucide-react';
 import { 
   AlertCircle, ArrowRight, CheckCircle, ChevronDown, ChevronLeft, ChevronRight,
   Download, Eye, File, FileText, Filter, Info, Search, X, Database, 
@@ -233,52 +234,7 @@ const FormFillerApp = () => {
     }
   }, []);
 
-  // Process form with backend
-  // Replace the processForm function in FormFillerApp.jsx
-  const processForm = async () => {
-    try {
-      setStep(3);
-      setProcessing(true);
-      setError(null);
-      
-      const formData = new FormData();
-      formData.append('file', csvFile);
-      formData.append('formType', selectedTemplate.id);
-      
-      console.log('Processing form with:', {
-        formType: selectedTemplate.id,
-        fileName: csvFile.name
-      });
-      
-      const response = await fetch('/api/forms/process', {
-        method: 'POST',
-        body: formData
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to process forms');
-      }
-      
-      const result = await response.json();
-      console.log('Process result:', result);
-      
-      // Ensure batchId exists in the result
-      if (!result.batchId) {
-        console.error('Server response missing batchId:', result);
-        throw new Error('Server response missing batch ID');
-      }
-      
-      // Set processing results with proper batch ID
-      setProcessingResults(result);
-      setCompleted(true);
-    } catch (err) {
-      console.error('Error processing forms:', err);
-      setError(err.message || 'Failed to process forms');
-    } finally {
-      setProcessing(false);
-    }
-  };
+ 
 
 
   const resetForm = () => {
@@ -356,15 +312,27 @@ const FormFillerApp = () => {
   
   const renderPreviewModal = () => (
     <>
-      {/* PDF Preview Modal */}
+      {/* Template Preview Modal */}
       <PdfPreviewComponent
         showModal={showPreviewModal}
         template={selectedTemplate}
+        isFilledForm={false}
+        filledFormInfo={null}
         onClose={() => setShowPreviewModal(false)}
         onUseTemplate={(template) => {
           setSelectedTemplate(template);
           setStep(2);
         }}
+      />
+      
+      {/* Filled Form Preview Modal */}
+      <PdfPreviewComponent
+        showModal={showFilledPreview}
+        template={null}
+        isFilledForm={true}
+        filledFormInfo={previewFilledForm}
+        onClose={() => setShowFilledPreview(false)}
+        onUseTemplate={() => {}}
       />
       
       {/* Email Preview Modal */}
@@ -913,7 +881,10 @@ const FormFillerApp = () => {
             <div className="w-20 h-20 border-4 border-t-blue-600 border-blue-100 rounded-full animate-spin mx-auto mb-6"></div>
             <p className="text-xl font-medium text-gray-800 mb-2">Processing Forms</p>
             <p className="text-gray-500">
-              Filling {previewData?.rows.length} forms with your data...
+              {selectedTemplate?.type === 'email' 
+                ? `Generating ${previewData?.rows.length} emails with your data...`
+                : `Filling ${previewData?.rows.length} forms with your data...`
+              }
             </p>
             
             {/* Progress bar */}
@@ -940,7 +911,12 @@ const FormFillerApp = () => {
                 </div>
                 <div>
                   <h3 className="font-medium text-gray-900">Processing Complete</h3>
-                  <p className="text-sm text-gray-500 mt-1">All forms have been processed successfully</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {selectedTemplate?.type === 'email' 
+                      ? 'All emails have been processed successfully'
+                      : 'All forms have been processed successfully'
+                    }
+                  </p>
                 </div>
               </div>
             </div>
@@ -961,13 +937,17 @@ const FormFillerApp = () => {
                 
                 <div className="bg-blue-50 rounded-xl p-5 border border-blue-100">
                   <h4 className="text-blue-700 font-medium mb-3 flex items-center">
-                    <FileText size={18} className="mr-2" /> Forms Created
+                    {selectedTemplate?.type === 'email' ? (
+                      <><Mail size={18} className="mr-2" /> Emails Created</>
+                    ) : (
+                      <><FileText size={18} className="mr-2" /> Forms Created</>
+                    )}
                   </h4>
                   <div className="text-3xl font-bold text-gray-800">
                     {processingResults?.successCount || previewData?.rows.length}
                   </div>
                   <p className="text-gray-500 text-sm mt-1">
-                    {selectedTemplate?.type.toUpperCase()} documents
+                    {selectedTemplate?.type === 'email' ? 'Email files (.eml)' : `${selectedTemplate?.type.toUpperCase()} documents`}
                   </p>
                 </div>
                 
@@ -980,7 +960,9 @@ const FormFillerApp = () => {
                 </div>
               </div>
               
-              <h4 className="font-medium text-gray-800 mb-4">Generated Files</h4>
+              <h4 className="font-medium text-gray-800 mb-4">
+                {selectedTemplate?.type === 'email' ? 'Generated Email Files' : 'Generated Form Files'}
+              </h4>
               <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
                 <div className="flex items-center justify-between mb-4 px-2">
                   <div className="text-sm text-gray-600">Filename</div>
@@ -992,13 +974,17 @@ const FormFillerApp = () => {
                 
                 <div className="space-y-2">
                   {(processingResults?.files || [...Array(previewData?.rows.length)].map((_, i) => ({
-                    name: `filled_${selectedTemplate?.name}_${i+1}.${selectedTemplate?.type}`,
+                    name: `filled_${selectedTemplate?.name}_${i+1}.${selectedTemplate?.type === 'email' ? 'eml' : 'pdf'}`,
                     size: '117 KB',
                     date: new Date().toLocaleDateString()
                   }))).map((file, i) => (
                     <div key={i} className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-100">
                       <div className="flex items-center">
-                        <FileText className="text-blue-500 mr-3" size={20} />
+                        {file.name.endsWith('.eml') ? (
+                          <Mail className="text-blue-500 mr-3" size={20} />
+                        ) : (
+                          <FileText className="text-blue-500 mr-3" size={20} />
+                        )}
                         <div>
                           <p className="font-medium text-gray-800">{file.name}</p>
                           <p className="text-xs text-gray-500">Created: {file.date}</p>
@@ -1006,38 +992,42 @@ const FormFillerApp = () => {
                       </div>
                       <div className="flex space-x-8 items-center">
                         <div className="text-sm text-gray-600 w-20 text-center">{file.size}</div>
-                        <div className="w-20">
-
-                        <button 
-                          className="p-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-gray-100 transition-colors"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            // Set the filled form for preview
-                            setPreviewFilledForm({
-                              name: file.name,
-                              batchId: processingResults.batchId
-                            });
-                            setShowFilledPreview(true);
-                          }}
-                        >
-                          <Eye size={18} />
-                        </button>
-                        <button 
-                          className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (processingResults && processingResults.batchId) {
-                              downloadForm(file.name, processingResults.batchId);
-                            } else {
-                              console.error('Missing batch ID for download', processingResults);
-                              alert('Error: Cannot download file. Missing batch information.');
-                            }
-                          }}
-                        >
-                          <Download size={18} />
-                        </button>
+                        <div className="w-20 flex space-x-1">
+                          <button 
+                            className="p-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-gray-100 transition-colors"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              
+                              // Determine file type from extension
+                              const fileType = file.name.endsWith('.eml') ? 'email' : 'pdf';
+                              
+                              // Set the filled form for preview with type info
+                              setPreviewFilledForm({
+                                name: file.name,
+                                batchId: processingResults.batchId,
+                                type: fileType
+                              });
+                              setShowFilledPreview(true);
+                            }}
+                          >
+                            <Eye size={18} />
+                          </button>
+                          <button 
+                            className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (processingResults && processingResults.batchId) {
+                                downloadForm(file.name, processingResults.batchId);
+                              } else {
+                                console.error('Missing batch ID for download', processingResults);
+                                alert('Error: Cannot download file. Missing batch information.');
+                              }
+                            }}
+                          >
+                            <Download size={18} />
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -1054,6 +1044,18 @@ const FormFillerApp = () => {
                 </div>
               </div>
             </div>
+          </div>
+        ) : error ? (
+          <div className="p-6 text-center">
+            <AlertCircle size={48} className="text-red-500 mx-auto mb-4" />
+            <p className="text-xl font-medium text-gray-800 mb-2">Error</p>
+            <p className="text-red-500 mb-4">{error}</p>
+            <button
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+              onClick={() => setError(null)}
+            >
+              Try Again
+            </button>
           </div>
         ) : null}
       </div>
@@ -1084,9 +1086,60 @@ const FormFillerApp = () => {
   );
 
 
+  const processForm = async () => {
+    try {
+      setStep(3);
+      setProcessing(true);
+      setError(null);
+      
+      const formData = new FormData();
+      formData.append('file', csvFile);
+      formData.append('formType', selectedTemplate.id);
+      
+      // Log processing details
+      console.log('Processing form with:', {
+        formType: selectedTemplate.id,
+        fileName: csvFile.name,
+        templateType: selectedTemplate.type
+      });
+      
+      const response = await fetch('/api/forms/process', {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to process forms');
+      }
+      
+      const result = await response.json();
+      console.log('Process result:', result);
+      
+      // Ensure batchId exists in the result
+      if (!result.batchId) {
+        console.error('Server response missing batchId:', result);
+        throw new Error('Server response missing batch ID');
+      }
+      
+      // Set processing results with proper batch ID
+      setProcessingResults(result);
+      setCompleted(true);
+    } catch (err) {
+      console.error('Error processing forms:', err);
+      setError(err.message || 'Failed to process forms');
+    } finally {
+      setProcessing(false);
+    }
+  };
+  
+  // Update downloadForm function to determine file type from extension
   const downloadForm = (fileName, batchId) => {
     try {
       console.log(`Attempting to download: ${fileName} from batch ${batchId}`);
+      
+      // Determine file type based on extension
+      const fileType = fileName.endsWith('.eml') ? 'email' : 'pdf';
       
       // Create and display a loading message
       const statusId = `download-status-${Date.now()}`;
@@ -1097,7 +1150,7 @@ const FormFillerApp = () => {
       document.body.appendChild(statusDiv);
       
       // Use fetch to handle potential errors better
-      fetch(`/api/forms/download?file=${encodeURIComponent(fileName)}&batchId=${batchId}&t=${Date.now()}`)
+      fetch(`/api/forms/download?file=${encodeURIComponent(fileName)}&batchId=${batchId}&type=${fileType}&t=${Date.now()}`)
         .then(response => {
           if (!response.ok) {
             if (response.headers.get('content-type')?.includes('application/json')) {
@@ -1140,8 +1193,8 @@ const FormFillerApp = () => {
       alert(`Error downloading file: ${error.message}`);
     }
   };
-
-// Download all files function
+  
+  // Update downloadAllForms function
   const downloadAllForms = (e) => {
     if (e) {
       e.preventDefault();
@@ -1164,7 +1217,14 @@ const FormFillerApp = () => {
       document.body.appendChild(statusDiv);
       
       const batchId = processingResults.batchId;
-      const url = `/api/forms/download-all?batchId=${batchId}&t=${Date.now()}`;
+      
+      // Get file type from processingResults if available, or determine based on first file
+      let fileType = processingResults.fileType;
+      if (!fileType && processingResults.files && processingResults.files.length > 0) {
+        fileType = processingResults.files[0].name.endsWith('.eml') ? 'email' : 'pdf';
+      }
+      
+      const url = `/api/forms/download-all?batchId=${batchId}&type=${fileType || 'pdf'}&t=${Date.now()}`;
       
       // Use fetch to handle potential errors
       fetch(url)
@@ -1183,7 +1243,7 @@ const FormFillerApp = () => {
           // Create download link for the blob
           const link = document.createElement('a');
           link.href = URL.createObjectURL(blob);
-          link.download = `forms_${batchId}.zip`;
+          link.download = `files_${batchId}.zip`;
           document.body.appendChild(link);
           link.click();
           
@@ -1193,7 +1253,7 @@ const FormFillerApp = () => {
             
             // Update status to success
             statusDiv.className = 'fixed bottom-4 right-4 bg-green-100 text-green-800 p-4 rounded-lg shadow-md z-50';
-            statusDiv.innerHTML = `<div class="flex items-center">✓ Downloaded all forms</div>`;
+            statusDiv.innerHTML = `<div class="flex items-center">✓ Downloaded all files</div>`;
             setTimeout(() => document.body.removeChild(statusDiv), 3000);
           }, 1000);
         })
@@ -1257,7 +1317,7 @@ const FormFillerApp = () => {
       <div className="max-w-6xl mx-auto">
         <header className="mb-10">
           <div className="flex items-center justify-between">
-            <h1 className="text-3xl font-bold text-gray-900">PDF Form Filler</h1>
+            <h1 className="text-3xl font-bold text-gray-900">Anonymate</h1>
             <div className="flex space-x-4">
               <button className="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 flex items-center gap-2">
                 <Info size={18} /> Help
