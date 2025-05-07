@@ -96,6 +96,10 @@ const FormFillerApp = () => {
     return typeMatch && (nameMatch || descriptionMatch || idMatch);
   });
   
+  const getApiUrl = (endpoint) => {
+    const baseUrl = window.electron ? 'http://localhost:5000' : '';
+    return `${baseUrl}/api${endpoint}`;
+  };
   // Sort templates
   const sortedTemplates = [...filteredTemplates].sort((a, b) => {
     let comparison = 0;
@@ -1433,16 +1437,7 @@ const FormFillerApp = () => {
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
       <div className="max-w-6xl mx-auto">
-        <header className="mb-10">
-          <div className="flex items-center justify-between">
-            <h1 className="text-3xl font-bold text-gray-900">ANONYMATE</h1>
-            <div className="flex space-x-4">
-              <button className="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 flex items-center gap-2">
-                <Info size={18} /> Help
-              </button>
-            </div>
-          </div>
-        </header>
+        
         
         {error ? renderError() : (
           <>

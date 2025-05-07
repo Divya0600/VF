@@ -1,12 +1,9 @@
+// src/App.js
 import React from 'react';
-import FormFillerApp from './components/FormFillerApp';
+import HomePage from './HomePage';
 
 function App() {
-  return (
-    <div className="App">
-      <FormFillerApp />
-    </div>
-  );
+  return <HomePage />;
 }
 
 export default App;

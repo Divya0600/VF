@@ -16,28 +16,32 @@ app = Flask(__name__)
 # Helper function to identify email templates
 import os
 
+# Example: Update get_email_templates in server.py
 def get_email_templates():
-    """Get list of available email templates"""
     templates = []
-    email_dir = os.path.join('input', 'email')  # Updated path
+    app_data_path = get_app_data_path()
+    email_dir = os.path.join(app_data_path, 'resources', 'input', 'email')
     if os.path.exists(email_dir):
         templates = [os.path.splitext(f)[0] for f in os.listdir(email_dir) if f.endswith('.eml')]
     return templates
 
+def get_app_data_path():
+    """Get Anonymate app data directory"""
+    if os.name == 'nt':  # Windows
+        return os.path.join(os.environ.get('APPDATA', ''), 'Anonymate')
+    return os.path.expanduser('~/.anonymate')
 
-# Ensure required directories exist
 def ensure_directories():
-    """Create necessary directories if they don't exist"""
+    app_data_path = get_app_data_path()
     required_dirs = [
-        'output',
-        'output/pdf',
-        'output/email',
-        'forms_config'
+        os.path.join(app_data_path, 'resources', 'input'),
+        os.path.join(app_data_path, 'output', 'pdf'),
+        os.path.join(app_data_path, 'output', 'email'),
+        os.path.join(app_data_path, 'forms_config')
     ]
     for directory in required_dirs:
         if not os.path.exists(directory):
             os.makedirs(directory)
-            print(f"Created {directory} directory")
 
 @app.route('/api/forms/types', methods=['GET'])
 def get_form_types():
