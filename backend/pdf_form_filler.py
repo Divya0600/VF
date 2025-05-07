@@ -15,7 +15,7 @@ from reportlab.lib.colors import white
 
 # Constants
 CONFIG_DIR = "forms_config"
-FORMS_DIR = "forms"
+FORMS_DIR = os.path.join("input", "pdf")
 OUTPUT_DIR = "output"
 DATA_DIR = "data"
 TEMP_OVERLAY = "temp_overlay.pdf"

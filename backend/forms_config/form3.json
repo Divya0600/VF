@@ -1,7 +1,7 @@
 {
     "name": "Vodafone Widerrufsformular",
     "description": "Configuration for Vodafone cancellation form",
-    "empty_form_file": "forms/empty_form3.pdf",
+    "empty_form_file": "input/pdf/empty_form3.pdf",
     "output_file": "output/filled_form3.pdf",
     "temp_overlay_file": "temp_overlay.pdf",
     "font_size": 10,

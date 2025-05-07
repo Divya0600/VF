@@ -130,8 +130,8 @@ def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description="Batch Email Content Replacer")
     parser.add_argument("-c", "--csv", required=True, help="CSV file with replacement data")
-    parser.add_argument("-t", "--input", default="email/input", help="Directory with email templates")
-    parser.add_argument("-o", "--output", default="email/output", help="Output directory for processed files")
+    parser.add_argument("-t", "--input", default="input/email", help="Directory with email templates")
+    parser.add_argument("-o", "--output", default="output/email", help="Output directory for processed files")
     args = parser.parse_args()
     
     # Process the batch

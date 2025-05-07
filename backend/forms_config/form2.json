@@ -1,7 +1,7 @@
 {
     "name": "Vodafone Vollmacht Form",
     "description": "Configuration for Vodafone power of attorney form",
-    "empty_form_file": "forms/empty_form2.pdf",
+    "empty_form_file": "input/pdf/empty_form2.pdf",
     "output_file": "output/filled_form2.pdf",
     "temp_overlay_file": "temp_overlay.pdf",
     "font_size": 10,

@@ -14,13 +14,16 @@ from email_processor import process_email_with_attachments
 app = Flask(__name__)
 
 # Helper function to identify email templates
+import os
+
 def get_email_templates():
     """Get list of available email templates"""
     templates = []
-    email_dir = os.path.join('email', 'input')
+    email_dir = os.path.join('input', 'email')  # Updated path
     if os.path.exists(email_dir):
         templates = [os.path.splitext(f)[0] for f in os.listdir(email_dir) if f.endswith('.eml')]
     return templates
+
 
 # Ensure required directories exist
 def ensure_directories():
@@ -29,9 +32,6 @@ def ensure_directories():
         'output',
         'output/pdf',
         'output/email',
-        'temp',
-        'email/input',
-        'email/output',
         'forms_config'
     ]
     for directory in required_dirs:
@@ -72,7 +72,7 @@ def get_templates():
             })
     
     # Now add email templates (which don't have config files)
-    email_dir = os.path.join('email', 'input')
+    email_dir = os.path.join('input', 'email')  # Updated path
     if os.path.exists(email_dir):
         for filename in os.listdir(email_dir):
             if filename.endswith('.eml'):
@@ -164,7 +164,7 @@ def preview_email_template():
         return jsonify({'error': 'Email template ID not specified'}), 400
     
     # Find the email template file
-    template_path = os.path.join('email', 'input', f"{template_id}.eml")
+    template_path = os.path.join('input','email', f"{template_id}.eml")
     
     if not os.path.exists(template_path):
         return jsonify({'error': 'Email template not found'}), 404
@@ -371,8 +371,8 @@ def preview_filled_form():
     # Add email-specific paths if needed
     if file_type == "email":
         potential_paths.extend([
-            os.path.join('email', 'output', batch_id, file_name),
-            os.path.join('email', 'output', file_name)
+            os.path.join('output', 'email', batch_id, file_name),
+            os.path.join('output', 'email', file_name)
         ])
     
     # Find first existing file path
@@ -468,10 +468,10 @@ def process_forms():
             try:
                 # Check if it's an Excel file for email with attachments
                 if file.filename.endswith('.xlsx'):
-                    success = process_email_with_attachments(temp_csv_path, 'email/input', output_dir)
+                    success = process_email_with_attachments(temp_csv_path, 'input/email', output_dir)
                 else:
                     # Regular CSV for email replacements
-                    success = batch_process_emails(temp_csv_path, 'email/input', output_dir)
+                    success = batch_process_emails(temp_csv_path, 'input/email', output_dir)
                 
                 # List generated email files
                 if os.path.exists(output_dir):
@@ -565,8 +565,8 @@ def download_form():
     # Add email-specific paths if needed
     if file_type == "email":
         potential_paths.extend([
-            os.path.join('email', 'output', batch_id, file_name),
-            os.path.join('email', 'output', file_name)
+            os.path.join( 'output','email', batch_id, file_name),
+            os.path.join('output', 'email',file_name)
         ])
     
     # Find first existing file path
@@ -627,7 +627,7 @@ def download_all_forms():
         # Email-specific paths
         batch_paths = [
             os.path.join('output', 'email', batch_id),
-            os.path.join('email', 'output', batch_id)
+            os.path.join( 'output','email', batch_id)
         ]
     elif file_type == "pdf":
         # PDF-specific paths
@@ -640,7 +640,7 @@ def download_all_forms():
             os.path.join('output', 'pdf', batch_id),
             os.path.join('output', 'email', batch_id),
             os.path.join('output', batch_id),
-            os.path.join('email', 'output', batch_id)
+            os.path.join( 'output','email', batch_id)
         ]
     
     # Find which path exists
@@ -677,7 +677,7 @@ def download_all_forms():
                 if os.path.isfile(file_path) and any(file_name.endswith(ext) for ext in extensions):
                     # If we're in the output root, only include files with batch_id in their name
                     if (batch_dir == os.path.join('output') or 
-                        batch_dir == os.path.join('email', 'output')) and batch_id not in file_name:
+                        batch_dir == os.path.join( 'output','email',)) and batch_id not in file_name:
                         continue
                         
                     zf.write(file_path, file_name)

@@ -1,7 +1,7 @@
 {
   "name": "Form Type 1",
   "description": "Contract partner change form",
-  "empty_form_file": "forms/empty_form1.pdf",
+  "empty_form_file": "input/pdf//empty_form1.pdf",
   "output_file": "output/filled_form.pdf",
   "temp_overlay_file": "temp_overlay.pdf",
   "font_size": 10,
