@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import PdfPreviewComponent from './PdfPreviewComponent';
 import EmailPreviewComponent from './EmailPreviewComponent';
+
 import { 
   AlertCircle, ArrowRight, CheckCircle, ChevronDown, ChevronLeft, ChevronRight,
   Download, Eye, File, FileText, Filter, Info, Search, X, Database, 
@@ -10,7 +11,10 @@ import {
 const FormFillerApp = () => {
   // State declarations
   const [step, setStep] = useState(1);
+  const [processingProgress, setProcessingProgress] = useState(0);
   const [formTypes, setFormTypes] = useState([]);
+  const [currentFilesPage, setCurrentFilesPage] = useState(1);
+  const filesPerPage = 10;
   const [templates, setTemplates] = useState([]);
   const [selectedFormType, setSelectedFormType] = useState(null);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
@@ -60,7 +64,7 @@ const FormFillerApp = () => {
           
           // Add 'all' type if not present
           const formTypesList = [
-            { id: 'all', name: 'All Forms' },
+          
             ...typesData.formTypes
           ];
           
@@ -249,40 +253,48 @@ const FormFillerApp = () => {
       setStep(3);
       setProcessing(true);
       setError(null);
+      setProcessingProgress(0); // Reset progress
       
       const formData = new FormData();
       formData.append('file', csvFile);
       formData.append('formType', selectedTemplate.id);
       
-      console.log('Processing form with:', {
-        formType: selectedTemplate.id,
-        fileName: csvFile.name
-      });
-      
+      // If you have a backend endpoint that supports progress tracking:
       const response = await fetch('/api/forms/process', {
         method: 'POST',
-        body: formData
+        body: formData,
       });
       
+      // For backend without progress API, implement a simulated progress
+      // that advances based on the estimated time needed
+      const totalRecords = previewData?.rows?.length || 1;
+      const progressInterval = setInterval(() => {
+        setProcessingProgress(current => {
+          // Simulated progress that moves faster at the beginning,
+          // then slows down near completion, capped at 90%
+          if (current < 90) {
+            return Math.min(current + (90 - current) / 10, 90);
+          }
+          return current;
+        });
+      }, 300);
+      
       if (!response.ok) {
+        clearInterval(progressInterval);
         const errorData = await response.json();
         throw new Error(errorData.error || 'Failed to process forms');
       }
       
       const result = await response.json();
-      console.log('Process result:', result);
       
-      // Ensure batchId exists in the result
-      if (!result.batchId) {
-        console.error('Server response missing batchId:', result);
-        throw new Error('Server response missing batch ID');
-      }
+      // Clear the interval and set progress to 100% on success
+      clearInterval(progressInterval);
+      setProcessingProgress(100);
       
-      // Set processing results with proper batch ID
       setProcessingResults(result);
       setCompleted(true);
     } catch (err) {
-      console.error('Error processing forms:', err);
+      setProcessingProgress(0);
       setError(err.message || 'Failed to process forms');
     } finally {
       setProcessing(false);
@@ -946,190 +958,294 @@ const FormFillerApp = () => {
     </div>
   );
 
-  // STEP 3: Results
-  const renderResults = () => (
-    <div className="w-full">
-      <h2 className="text-2xl font-semibold mb-6 text-gray-800">Results</h2>
-      
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        {processing ? (
-          <div className="py-16 px-6 text-center">
-            <div className="w-20 h-20 border-4 border-t-blue-600 border-blue-100 rounded-full animate-spin mx-auto mb-6"></div>
-            <p className="text-xl font-medium text-gray-800 mb-2">Processing Forms</p>
-            <p className="text-gray-500">
-              Filling {previewData?.rows.length} forms with your data...
-            </p>
-            
-            {/* Progress bar */}
-            <div className="max-w-md mx-auto mt-8">
-              <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden">
-                <div className="h-full bg-blue-600 rounded-full w-1/2 animate-pulse"></div>
-              </div>
-              <p className="text-right text-sm text-gray-500 mt-2">50% Complete</p>
-            </div>
-            
-            <div className="max-w-md mx-auto mt-8 bg-blue-50 p-4 rounded-lg border border-blue-100">
-              <div className="flex items-center">
-                <Info size={20} className="text-blue-500 mr-3" />
-                <p className="text-sm text-blue-700">This process may take a few moments depending on the number of forms</p>
-              </div>
-            </div>
-          </div>
-        ) : completed ? (
-          <div>
-            <div className="border-b border-gray-100 px-6 py-5">
-              <div className="flex items-center">
-                <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center text-green-600 mr-4">
-                  <CheckCircle size={20} />
+
+
+// Step 3: Results with pagination for files
+  const renderResults = () => {
+    // Get the files to display
+    const files = processingResults?.files || [...Array(previewData?.rows.length)].map((_, i) => ({
+      name: `filled_${selectedTemplate?.name}_${i+1}.${selectedTemplate?.type}`,
+      size: '117 KB',
+      date: new Date().toLocaleDateString()
+    }));
+    
+    // Calculate pagination
+    const totalFiles = files.length;
+    const totalPages = Math.ceil(totalFiles / filesPerPage);
+    const indexOfLastFile = currentFilesPage * filesPerPage;
+    const indexOfFirstFile = indexOfLastFile - filesPerPage;
+    const currentFiles = files.slice(indexOfFirstFile, indexOfLastFile);
+    
+    // Page change handlers
+    const goToNextPage = () => {
+      setCurrentFilesPage(current => Math.min(current + 1, totalPages));
+    };
+    
+    const goToPrevPage = () => {
+      setCurrentFilesPage(current => Math.max(current - 1, 1));
+    };
+    
+    const goToPage = (pageNumber) => {
+      setCurrentFilesPage(pageNumber);
+    };
+    
+    return (
+      <div className="w-full">
+        <h2 className="text-2xl font-semibold mb-6 text-gray-800">Results</h2>
+        
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          {processing ? (
+            <div className="py-16 px-6 text-center">
+              <div className="w-20 h-20 border-4 border-t-blue-600 border-blue-100 rounded-full animate-spin mx-auto mb-6"></div>
+              <p className="text-xl font-medium text-gray-800 mb-2">Processing Forms</p>
+              <p className="text-gray-500">
+                Filling {previewData?.rows.length} forms with your data...
+              </p>
+              
+              {/* Dynamic progress bar */}
+              <div className="max-w-md mx-auto mt-8">
+                <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-blue-600 rounded-full transition-all duration-300"
+                    style={{ width: `${processingProgress}%` }}
+                  ></div>
                 </div>
-                <div>
-                  <h3 className="font-medium text-gray-900">Processing Complete</h3>
-                  <p className="text-sm text-gray-500 mt-1">All forms have been processed successfully</p>
+                <p className="text-right text-sm text-gray-500 mt-2">
+                  {processingProgress.toFixed(0)}% Complete
+                </p>
+              </div>
+              
+              <div className="max-w-md mx-auto mt-8 bg-blue-50 p-4 rounded-lg border border-blue-100">
+                <div className="flex items-center">
+                  <Info size={20} className="text-blue-500 mr-3" />
+                  <p className="text-sm text-blue-700">This process may take a few moments depending on the number of forms</p>
                 </div>
               </div>
             </div>
-            
-            <div className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <div className="bg-green-50 rounded-xl p-5 border border-green-100">
-                  <h4 className="text-green-700 font-medium mb-3 flex items-center">
-                    <CheckCircle size={18} className="mr-2" /> Success Rate
-                  </h4>
-                  <div className="text-3xl font-bold text-gray-800">
-                    {processingResults?.successRate || '100%'}
+          ) : completed ? (
+            <div>
+              <div className="border-b border-gray-100 px-6 py-5">
+                <div className="flex items-center">
+                  <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center text-green-600 mr-4">
+                    <CheckCircle size={20} />
                   </div>
-                  <p className="text-gray-500 text-sm mt-1">
-                    {processingResults?.successCount || previewData?.rows.length} of {previewData?.rows.length} records processed
-                  </p>
-                </div>
-                
-                <div className="bg-blue-50 rounded-xl p-5 border border-blue-100">
-                  <h4 className="text-blue-700 font-medium mb-3 flex items-center">
-                    {selectedTemplate?.type === 'email' ? (
-                      <Mail size={18} className="mr-2" />
-                    ) : (
-                      <FileText size={18} className="mr-2" />
-                    )}
-                    {selectedTemplate?.type === 'email' ? 'Emails Created' : 'Forms Created'}
-                  </h4>
-                  <div className="text-3xl font-bold text-gray-800">
-                    {processingResults?.successCount || previewData?.rows.length}
+                  <div>
+                    <h3 className="font-medium text-gray-900">Processing Complete</h3>
+                    <p className="text-sm text-gray-500 mt-1">All forms have been processed successfully</p>
                   </div>
-                  <p className="text-gray-500 text-sm mt-1">
-                    {selectedTemplate?.type.toUpperCase()} documents
-                  </p>
-                </div>
-                
-                <div className="bg-gray-50 rounded-xl p-5 border border-gray-100">
-                  <h4 className="text-gray-700 font-medium mb-3 flex items-center">
-                    <Database size={18} className="mr-2" /> Data Records
-                  </h4>
-                  <div className="text-3xl font-bold text-gray-800">{previewData?.rows.length}</div>
-                  <p className="text-gray-500 text-sm mt-1">From {csvFile?.name}</p>
                 </div>
               </div>
               
-              <h4 className="font-medium text-gray-800 mb-4">Generated Files</h4>
-              <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                <div className="flex items-center justify-between mb-4 px-2">
-                  <div className="text-sm text-gray-600">Filename</div>
-                  <div className="flex space-x-8">
-                    <div className="text-sm text-gray-600 w-20 text-center">Size</div>
-                    <div className="text-sm text-gray-600 w-20">Actions</div>
+              <div className="p-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                  <div className="bg-green-50 rounded-xl p-5 border border-green-100">
+                    <h4 className="text-green-700 font-medium mb-3 flex items-center">
+                      <CheckCircle size={18} className="mr-2" /> Success Rate
+                    </h4>
+                    <div className="text-3xl font-bold text-gray-800">
+                      {processingResults?.successRate || '100%'}
+                    </div>
+                    <p className="text-gray-500 text-sm mt-1">
+                      {processingResults?.successCount || previewData?.rows.length} of {previewData?.rows.length} records processed
+                    </p>
+                  </div>
+                  
+                  <div className="bg-blue-50 rounded-xl p-5 border border-blue-100">
+                    <h4 className="text-blue-700 font-medium mb-3 flex items-center">
+                      {selectedTemplate?.type === 'email' ? (
+                        <Mail size={18} className="mr-2" />
+                      ) : (
+                        <FileText size={18} className="mr-2" />
+                      )}
+                      {selectedTemplate?.type === 'email' ? 'Emails Created' : 'Forms Created'}
+                    </h4>
+                    <div className="text-3xl font-bold text-gray-800">
+                      {processingResults?.successCount || previewData?.rows.length}
+                    </div>
+                    <p className="text-gray-500 text-sm mt-1">
+                      {selectedTemplate?.type.toUpperCase()} documents
+                    </p>
+                  </div>
+                  
+                  <div className="bg-gray-50 rounded-xl p-5 border border-gray-100">
+                    <h4 className="text-gray-700 font-medium mb-3 flex items-center">
+                      <Database size={18} className="mr-2" /> Data Records
+                    </h4>
+                    <div className="text-3xl font-bold text-gray-800">{previewData?.rows.length}</div>
+                    <p className="text-gray-500 text-sm mt-1">From {csvFile?.name}</p>
                   </div>
                 </div>
                 
-                <div className="space-y-2">
-                  {(processingResults?.files || [...Array(previewData?.rows.length)].map((_, i) => ({
-                    name: `filled_${selectedTemplate?.name}_${i+1}.${selectedTemplate?.type}`,
-                    size: '117 KB',
-                    date: new Date().toLocaleDateString()
-                  }))).map((file, i) => (
-                    <div key={i} className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-100">
-                      <div className="flex items-center">
-                        {file.name.endsWith('.eml') || selectedTemplate?.type === 'email' ? (
-                          <Mail className="text-blue-500 mr-3" size={20} />
-                        ) : (
-                          <FileText className="text-blue-500 mr-3" size={20} />
-                        )}
-                        <div>
-                          <p className="font-medium text-gray-800">{file.name}</p>
-                          <p className="text-xs text-gray-500">Created: {file.date}</p>
+                <h4 className="font-medium text-gray-800 mb-4">Generated Files</h4>
+                <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                  <div className="flex items-center justify-between mb-4 px-2">
+                    <div className="text-sm text-gray-600">Filename</div>
+                    <div className="flex space-x-8">
+                      <div className="text-sm text-gray-600 w-20 text-center">Size</div>
+                      <div className="text-sm text-gray-600 w-20">Actions</div>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    {currentFiles.map((file, i) => (
+                      <div key={i} className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-100">
+                        <div className="flex items-center">
+                          {file.name.endsWith('.eml') || selectedTemplate?.type === 'email' ? (
+                            <Mail className="text-blue-500 mr-3" size={20} />
+                          ) : (
+                            <FileText className="text-blue-500 mr-3" size={20} />
+                          )}
+                          <div>
+                            <p className="font-medium text-gray-800">{file.name}</p>
+                            <p className="text-xs text-gray-500">Created: {file.date}</p>
+                          </div>
+                        </div>
+                        <div className="flex space-x-8 items-center">
+                          <div className="text-sm text-gray-600 w-20 text-center">{file.size}</div>
+                          <div className="w-20 flex space-x-2">
+                            <button 
+                              className="p-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-gray-100 transition-colors"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                
+                                // Determine if this is an email or PDF file
+                                if (file.name.endsWith('.eml') || selectedTemplate?.type === 'email') {
+                                  // Preview email
+                                  previewProcessedEmail({
+                                    name: file.name,
+                                    batchId: processingResults.batchId
+                                  });
+                                } else {
+                                  // Preview PDF
+                                  setPreviewFilledForm({
+                                    name: file.name,
+                                    batchId: processingResults.batchId
+                                  });
+                                  setShowFilledPreview(true);
+                                }
+                              }}
+                            >
+                              <Eye size={18} />
+                            </button>
+                            <button 
+                              className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (processingResults && processingResults.batchId) {
+                                  downloadForm(file.name, processingResults.batchId);
+                                } else {
+                                  console.error('Missing batch ID for download', processingResults);
+                                  alert('Error: Cannot download file. Missing batch information.');
+                                }
+                              }}
+                            >
+                              <Download size={18} />
+                            </button>
+                          </div>
                         </div>
                       </div>
-                      <div className="flex space-x-8 items-center">
-                        <div className="text-sm text-gray-600 w-20 text-center">{file.size}</div>
-                        <div className="w-20 flex space-x-2">
-                          <button 
-                            className="p-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-gray-100 transition-colors"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              
-                              // Determine if this is an email or PDF file
-                              if (file.name.endsWith('.eml') || selectedTemplate?.type === 'email') {
-                                // Preview email
-                                previewProcessedEmail({
-                                  name: file.name,
-                                  batchId: processingResults.batchId
-                                });
-                              } else {
-                                // Preview PDF
-                                setPreviewFilledForm({
-                                  name: file.name,
-                                  batchId: processingResults.batchId
-                                });
-                                setShowFilledPreview(true);
-                              }
-                            }}
-                          >
-                            <Eye size={18} />
-                          </button>
-                          <button 
-                            className="p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              if (processingResults && processingResults.batchId) {
-                                downloadForm(file.name, processingResults.batchId);
-                              } else {
-                                console.error('Missing batch ID for download', processingResults);
-                                alert('Error: Cannot download file. Missing batch information.');
-                              }
-                            }}
-                          >
-                            <Download size={18} />
-                          </button>
-                        </div>
+                    ))}
+                  </div>
+                  
+                  {/* Pagination controls */}
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200">
+                      <div className="text-sm text-gray-500">
+                        Showing {indexOfFirstFile + 1} to {Math.min(indexOfLastFile, totalFiles)} of {totalFiles} files
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <button 
+                          className="p-2 border border-gray-200 rounded text-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                          disabled={currentFilesPage === 1}
+                          onClick={goToPrevPage}
+                        >
+                          <ChevronLeft size={18} />
+                        </button>
+                        
+                        {/* Page numbers */}
+                        {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                          // Logic to show pages around current page
+                          let pageNum;
+                          if (totalPages <= 5) {
+                            pageNum = i + 1;
+                          } else if (currentFilesPage <= 3) {
+                            pageNum = i + 1;
+                          } else if (currentFilesPage >= totalPages - 2) {
+                            pageNum = totalPages - 4 + i;
+                          } else {
+                            pageNum = currentFilesPage - 2 + i;
+                          }
+                          
+                          return (
+                            <button
+                              key={pageNum}
+                              className={`w-8 h-8 flex items-center justify-center rounded ${
+                                currentFilesPage === pageNum
+                                  ? 'bg-blue-600 text-white'
+                                  : 'border border-gray-200 text-gray-600 hover:bg-gray-50'
+                              }`}
+                              onClick={() => goToPage(pageNum)}
+                            >
+                              {pageNum}
+                            </button>
+                          );
+                        })}
+                        
+                        <button 
+                          className="p-2 border border-gray-200 rounded text-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                          disabled={currentFilesPage === totalPages}
+                          onClick={goToNextPage}
+                        >
+                          <ChevronRight size={18} />
+                        </button>
                       </div>
                     </div>
-                  ))}
-                </div>
-                
-                <div className="mt-4 text-center">
-                  <button 
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors inline-flex items-center gap-2"
-                    onClick={downloadAllForms}
-                  >
-                    <Download size={16} /> Download All Files
-                  </button>
+                  )}
+                  
+                  <div className="mt-4 text-center">
+                    <button 
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors inline-flex items-center gap-2"
+                      onClick={downloadAllForms}
+                    >
+                      <Download size={16} /> Download All Files
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        ) : null}
+          ) : error ? (
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 mx-auto mb-4 flex items-center justify-center rounded-full bg-red-100">
+                <AlertCircle size={32} className="text-red-600" />
+              </div>
+              <h3 className="text-xl font-medium text-gray-900 mb-2">Processing Error</h3>
+              <p className="text-red-600 mb-6">{error}</p>
+              <button
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                onClick={() => {
+                  setError(null);
+                  setStep(2);
+                }}
+              >
+                Go Back and Try Again
+              </button>
+            </div>
+          ) : null}
+        </div>
+        
+        <div className="mt-8 flex justify-center">
+          <button
+            className="px-6 py-3 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors"
+            onClick={resetForm}
+          >
+            Start New Batch
+          </button>
+        </div>
       </div>
-      
-      <div className="mt-8 flex justify-center">
-        <button
-          className="px-6 py-3 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors"
-          onClick={resetForm}
-        >
-          Start New Batch
-        </button>
-      </div>
-    </div>
-  );
+    );
+  };
 
   // Error component
   const renderError = () => (
@@ -1319,7 +1435,7 @@ const FormFillerApp = () => {
       <div className="max-w-6xl mx-auto">
         <header className="mb-10">
           <div className="flex items-center justify-between">
-            <h1 className="text-3xl font-bold text-gray-900">PDF Form Filler</h1>
+            <h1 className="text-3xl font-bold text-gray-900">ANONYMATE</h1>
             <div className="flex space-x-4">
               <button className="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 flex items-center gap-2">
                 <Info size={18} /> Help
